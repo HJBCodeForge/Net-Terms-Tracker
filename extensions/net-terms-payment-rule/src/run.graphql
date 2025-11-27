@@ -1,0 +1,14 @@
+# We name the query "RunInput" so the generated types are named "RunInput"
+query RunInput {
+  cart {
+    buyerIdentity {
+      customer {
+        isApproved: hasAnyTag(tags: ["Net30_Approved"])
+      }
+    }
+  }
+  paymentMethods {
+    id
+    name
+  }
+}
