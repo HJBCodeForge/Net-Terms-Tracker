@@ -1,15 +1,13 @@
 import type {
   RunInput,
-  FunctionRunResult,
+  CartPaymentMethodsTransformRunResult,
 } from "../generated/api";
 
-export function run(input: RunInput): FunctionRunResult {
+export function run(input: RunInput): CartPaymentMethodsTransformRunResult {
   // We rely on the boolean alias 'isApproved' returned by the GraphQL query (hasAnyTag).
-  const isApproved = input.cart.buyerIdentity?.customer?.isApproved ?? false;
-
-  // LOGGING - increment version tag so you can confirm the latest build is deployed.
-  console.error("DEBUG [Version 6]: User isApproved:", isApproved);
-  console.error("DEBUG [Version 6]: Available methods:", JSON.stringify(input.paymentMethods));
+  const buyerIdentity = input.cart.buyerIdentity;
+  const customer = buyerIdentity?.customer;
+  const isApproved = customer?.isApproved ?? false;
 
   const netTermsMethod = input.paymentMethods.find((method) => {
     const name = method.name.toLowerCase();
@@ -17,16 +15,13 @@ export function run(input: RunInput): FunctionRunResult {
   });
 
   if (!netTermsMethod) {
-    console.error("DEBUG [Version 6]: Net terms method not found.");
     return { operations: [] };
   }
 
   if (!isApproved) {
-    console.error("DEBUG [Version 6]: Hiding method via paymentMethodHide.");
     return {
       operations: [
         {
-          // @ts-ignore Shopify API expects paymentMethodHide even though current types lack it.
           paymentMethodHide: {
             paymentMethodId: netTermsMethod.id,
           },
@@ -35,6 +30,5 @@ export function run(input: RunInput): FunctionRunResult {
     };
   }
 
-  console.error("DEBUG [Version 6]: User approved. Leaving methods untouched.");
   return { operations: [] };
 }

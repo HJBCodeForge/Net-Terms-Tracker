@@ -295,6 +295,11 @@ export default function Index() {
                   </Text>
                   <List>
                     <List.Item>
+                      <Link url="/app/activate-rule" removeUnderline>
+                        Activate Net Terms Rule
+                      </Link>
+                    </List.Item>
+                    <List.Item>
                       Build an{" "}
                       <Link
                         url="https://shopify.dev/docs/apps/getting-started/build-app-example"

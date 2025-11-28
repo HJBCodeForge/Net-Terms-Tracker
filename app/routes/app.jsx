@@ -9,7 +9,6 @@ export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }) => {
   await authenticate.admin(request);
-
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
 
@@ -18,18 +17,20 @@ export default function App() {
 
   return (
     <AppProvider isEmbeddedApp apiKey={apiKey}>
+      {/* This NavMenu controls the top navigation bar of your app. 
+        We are adding the "Net Terms Manager" link here.
+        The 'to' prop matches the filename: app.net-terms.tsx -> "/app/net-terms"
+      */}
       <NavMenu>
-        <Link to="/app" rel="home">
-          Home
-        </Link>
-        <Link to="/app/additional">Additional page</Link>
+        <Link to="/app" rel="home">Home</Link>
+        <Link to="/app/net-terms">Net Terms Manager</Link> 
       </NavMenu>
       <Outlet />
     </AppProvider>
   );
 }
 
-// Shopify needs Remix to catch some thrown responses, so that their headers are included in the response.
+// Shopify needs this to handle errors gracefully
 export function ErrorBoundary() {
   return boundary.error(useRouteError());
 }
