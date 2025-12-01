@@ -24,6 +24,7 @@ export default function App() {
       <NavMenu>
         <Link to="/app" rel="home">Home</Link>
         <Link to="/app/net-terms">Net Terms Manager</Link> 
+        <Link to="/app/invoices">Invoices</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>

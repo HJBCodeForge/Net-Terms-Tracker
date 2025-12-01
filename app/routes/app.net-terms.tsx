@@ -15,8 +15,7 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 
-// 1. LOADER: Fetch Customers
-// FIXED: We strictly use 'email', not 'defaultEmailAddress'
+// 1. LOADER
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
 
@@ -39,7 +38,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const data = await response.json();
   
-  // Transform data for UI
   const customers = (data.data?.customers?.edges || []).map((edge: any) => {
     const node = edge.node;
     return {
@@ -54,44 +52,62 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({ customers });
 };
 
-// 2. ACTION: Handle "Approve" or "Revoke" clicks
+// 2. ACTION (LOUD DEBUG VERSION)
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
   
   const customerId = formData.get("customerId") as string;
-  const intent = formData.get("intent"); // "approve" or "revoke"
+  const intent = formData.get("intent"); 
+
+  console.log(`[Debug] Processing ${intent} for ID: ${customerId}`);
 
   if (!customerId) return json({ status: "error" });
 
   const TAG = "Net30_Approved";
   
-  // Define the mutation based on intent
   const mutation = intent === "approve" 
     ? `#graphql
       mutation addTags($id: ID!, $tags: [String!]!) {
         tagsAdd(id: $id, tags: $tags) {
           userErrors { field message }
+          node { ... on Customer { id tags } }
         }
       }`
     : `#graphql
       mutation removeTags($id: ID!, $tags: [String!]!) {
         tagsRemove(id: $id, tags: $tags) {
           userErrors { field message }
+          node { ... on Customer { id tags } }
         }
       }`;
 
-  await admin.graphql(mutation, {
-    variables: {
-      id: customerId,
-      tags: [TAG]
-    }
-  });
+  try {
+    const response = await admin.graphql(mutation, {
+      variables: {
+        id: customerId,
+        tags: [TAG]
+      }
+    });
 
-  return json({ status: "success" });
+    const responseJson = await response.json();
+
+    // --- THE LOUD LOGGING SECTION ---
+    console.log("========================================");
+    console.log("SHOPIFY API RESPONSE:");
+    console.log(JSON.stringify(responseJson, null, 2));
+    console.log("========================================");
+    // --------------------------------
+
+    return json({ status: "success", data: responseJson });
+
+  } catch (error) {
+    console.log("CRITICAL ERROR:", error);
+    return json({ status: "error", message: error.message });
+  }
 };
 
-// 3. UI COMPONENT
+// 3. UI COMPONENT (UPDATED WITH HIDDEN INPUT)
 export default function NetTermsManager() {
   const { customers } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
@@ -114,6 +130,11 @@ export default function NetTermsManager() {
                 const { id, name, email, initials, isApproved } = item;
                 const media = <Avatar customer size="md" name={name} initials={initials} />;
 
+                const isSubmitting = fetcher.formData?.get("customerId") === id;
+                
+                // Logic: If they are approved, next action is 'revoke'. If not, 'approve'.
+                const nextIntent = isApproved ? "revoke" : "approve";
+
                 return (
                   <ResourceItem
                     id={id}
@@ -121,13 +142,11 @@ export default function NetTermsManager() {
                     accessibilityLabel={`View details for ${name}`}
                   >
                     <InlineStack align="space-between" blockAlign="center">
-                        {/* Customer Info */}
                         <div style={{ width: "40%"}}>
                             <Text variant="bodyMd" fontWeight="bold" as="h3">{name}</Text>
                             <Text variant="bodySm" as="p" tone="subdued">{email}</Text>
                         </div>
 
-                        {/* Status Badge */}
                         <div style={{ width: "20%"}}>
                             {isApproved ? (
                                 <Badge tone="success">Net 30 Active</Badge>
@@ -136,16 +155,18 @@ export default function NetTermsManager() {
                             )}
                         </div>
 
-                        {/* Action Buttons */}
                         <div style={{ width: "30%", textAlign: "right" }}>
                            <fetcher.Form method="post">
                                <input type="hidden" name="customerId" value={id} />
+                               {/* THE FIX: Explicitly set the intent in a hidden field */}
+                               <input type="hidden" name="intent" value={nextIntent} />
+                               
                                {isApproved ? (
-                                   <Button submit variant="primary" tone="critical" name="intent" value="revoke">
+                                   <Button submit variant="primary" tone="critical" loading={isSubmitting}>
                                        Revoke Access
                                    </Button>
                                ) : (
-                                   <Button submit variant="primary" name="intent" value="approve">
+                                   <Button submit variant="primary" loading={isSubmitting}>
                                        Approve Net 30
                                    </Button>
                                )}

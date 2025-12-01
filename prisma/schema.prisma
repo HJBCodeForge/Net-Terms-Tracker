@@ -30,3 +30,19 @@ model Session {
   collaborator  Boolean?  @default(false)
   emailVerified Boolean?  @default(false)
 }
+
+// prisma/schema.prisma
+
+model Invoice {
+  id            String   @id @default(uuid())
+  orderId       String   @unique
+  orderNumber   String
+  customerId    String
+  customerName  String?
+  customerEmail String
+  amount        Float
+  currency      String
+  dueDate       DateTime
+  status        String   @default("PENDING") // PENDING, PAID, OVERDUE
+  createdAt     DateTime @default(now())
+}
