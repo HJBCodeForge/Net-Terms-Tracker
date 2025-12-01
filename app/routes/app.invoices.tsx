@@ -117,7 +117,18 @@ export default function InvoiceDashboard() {
     );
 
     return (
-        <Page title="Accounts Receivable">
+        <Page 
+      title="Accounts Receivable"
+      backAction={{ content: "Dashboard", url: "/app" }}
+      secondaryActions={[
+        { 
+            content: "Manage Access", url: "/app/net-terms"
+        },
+        {
+            content: "Dashboard", url: "/app"
+        }
+      ]}
+    >
             <Layout>
                 <Layout.Section>
                     <Card padding="0">

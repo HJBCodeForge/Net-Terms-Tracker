@@ -113,7 +113,18 @@ export default function NetTermsManager() {
   const fetcher = useFetcher();
 
   return (
-    <Page title="Net Terms Manager">
+    <Page 
+      title="Net Terms Manager"
+      backAction={{ content: "Dashboard", url: "/app" }}
+      secondaryActions={[
+        { 
+            content: "View Invoices", url: "/app/invoices" 
+        },
+        {
+            content: "Dashboard", url: "/app"
+        }
+      ]}
+    >
       <Layout>
         <Layout.Section>
            <Banner title="Gatekeeper Active">
