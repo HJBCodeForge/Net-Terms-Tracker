@@ -17,7 +17,18 @@ import { loginErrorMessage } from "./error.server";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }) => {
-  const errors = loginErrorMessage(await login(request));
+  const loginResult = await login(request);
+
+  // LOG EVERYTHING
+  console.log("[Auth Login] loginResult:", JSON.stringify(loginResult));
+  console.log("[Auth Login] Request URL:", request.url);
+
+  const errors = loginErrorMessage(loginResult);
+
+  if (errors.shop) {
+    console.log("[Auth Login] Login failed with errors:", errors);
+    console.log("[Auth Login] Request URL:", request.url);
+  }
 
   return { errors, polarisTranslations };
 };

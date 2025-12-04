@@ -8,6 +8,15 @@ import { authenticate } from "../shopify.server";
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }) => {
+  const url = new URL(request.url);
+  
+  // If returning from billing, skip authentication in the parent loader
+  // to avoid a redirect loop (authenticate.admin throws redirect on failure).
+  // The child route (app.pricing.jsx) will handle the client-side redirect.
+  if (url.searchParams.get("shop") && url.searchParams.get("charge_id")) {
+    return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  }
+
   await authenticate.admin(request);
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
@@ -25,6 +34,7 @@ export default function App() {
         <Link to="/app" rel="home">Home</Link>
         <Link to="/app/net-terms">Net Terms Manager</Link> 
         <Link to="/app/invoices">Invoices</Link>
+        <Link to="/app/pricing">Plans & Pricing</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>

@@ -46,3 +46,35 @@ model Invoice {
   status        String   @default("PENDING") // PENDING, PAID, OVERDUE
   createdAt     DateTime @default(now())
 }
+
+// app/prisma/schema.prisma
+
+// Existing Invoice model...
+// model Invoice { ... }
+
+// --- NEW BILLING MODELS ---
+
+model Shop {
+  id             String        @id @default(uuid())
+  shop           String        @unique // The myshopify.com domain
+  plan           PlanTier      @default(FREE)
+  subscriptionId String?       // The Shopify Global ID (gid://shopify/AppSubscription/...)
+  billingStatus  BillingStatus @default(PENDING)
+  customerCount  Int           @default(0) // Cache to enforce the 5-customer limit
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+enum PlanTier {
+  FREE
+  GROWTH
+  PRO
+}
+
+enum BillingStatus {
+  PENDING
+  ACTIVE
+  FROZEN    // Payment failed
+  CANCELLED
+  DECLINED
+}
