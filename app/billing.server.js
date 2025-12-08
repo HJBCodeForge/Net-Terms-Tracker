@@ -149,3 +149,69 @@ export async function requirePlan(shopDomain, requiredPlan) {
   
   return true;
 }
+
+// app/billing.server.js
+
+// ... existing code ...
+
+// 4. Helper to Cancel Subscription (Downgrade to Free)
+export async function cancelSubscription(request, shopDomain) {
+  const { admin } = await authenticate.admin(request);
+
+  // A. Find the active paid subscription
+  const response = await admin.graphql(
+    `#graphql
+    query {
+      appInstallation {
+        activeSubscriptions {
+          id
+          name
+          status
+        }
+      }
+    }`
+  );
+
+  const data = await response.json();
+  const activeSubscriptions = data.data.appInstallation.activeSubscriptions;
+
+  if (activeSubscriptions.length > 0) {
+    const subscriptionId = activeSubscriptions[0].id;
+
+    // B. Cancel it using the GraphQL Mutation
+    const cancelResponse = await admin.graphql(
+      `#graphql
+      mutation AppSubscriptionCancel($id: ID!) {
+        appSubscriptionCancel(id: $id) {
+          userErrors {
+            field
+            message
+          }
+          appSubscription {
+            id
+            status
+          }
+        }
+      }`,
+      {
+        variables: {
+          id: subscriptionId
+        }
+      }
+    );
+
+    const cancelData = await cancelResponse.json();
+    if (cancelData.data.appSubscriptionCancel.userErrors.length > 0) {
+      console.error("❌ Failed to cancel:", cancelData.data.appSubscriptionCancel.userErrors);
+      return false;
+    }
+  }
+
+  // C. Update Local DB to FREE
+  await db.shop.update({
+    where: { shop: shopDomain },
+    data: { plan: "FREE", billingStatus: "ACTIVE" } 
+  });
+
+  return true;
+}

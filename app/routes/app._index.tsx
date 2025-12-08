@@ -1,159 +1,117 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useFetcher } from "@remix-run/react"; 
+import { useLoaderData, Link } from "@remix-run/react";
 import {
   Page,
   Layout,
-  BlockStack,
   Card,
+  BlockStack,
+  InlineStack,
   Text,
   Button,
-  InlineGrid,
-  Divider,
+  Badge,
+  Banner,
   Box,
-  Banner
 } from "@shopify/polaris";
+import { CreditCardIcon, ReceiptIcon, SettingsIcon } from "@shopify/polaris-icons";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
 
-  const invoices = await db.invoice.findMany();
-  
-  const pendingInvoices = invoices.filter(i => i.status === "PENDING");
-  const overdueInvoices = invoices.filter(i => i.status === "OVERDUE"); 
-  const pendingCount = pendingInvoices.length;
-  const overdueCount = overdueInvoices.length;
-  
-  const totalDue = pendingInvoices.reduce((sum, invoice) => sum + invoice.amount, 0) +
-                   overdueInvoices.reduce((sum, invoice) => sum + invoice.amount, 0);
-
-  return json({ 
-    totalDue, 
-    pendingCount,
-    overdueCount, 
-    totalCount: invoices.length 
+  // 1. Fetch Shop Plan
+  const shopRecord = await db.shop.findUnique({
+    where: { shop: session.shop },
   });
+  const plan = shopRecord?.plan || "FREE";
+
+  // 2. Fetch Quick Stats (Optional polish)
+  const pendingInvoices = await db.invoice.count({
+    where: { shop: session.shop, status: "PENDING" }
+  });
+
+  return json({ plan, pendingInvoices });
 };
 
 export default function Index() {
-  const { totalDue, pendingCount, overdueCount, totalCount } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher(); 
-
-  const formatMoney = (amount: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    }).format(amount);
-  };
-
-  const isRunningCheck = fetcher.state === "submitting";
+  const { plan, pendingInvoices } = useLoaderData<typeof loader>();
+  const isFree = plan === "FREE";
 
   return (
     <Page title="Dashboard">
-      <BlockStack gap="500">
-        
-        {/* 1. TOP SUMMARY BANNER */}
-        <Layout>
-          <Layout.Section>
-            {overdueCount > 0 && (
-                <Banner tone="critical" title={`Alert: ${overdueCount} invoices are Overdue.`}>
-                   <p>Net Terms access has been revoked for these customers.</p>
-                </Banner>
-            )}
-            {pendingCount > 0 && overdueCount === 0 && (
-                <Banner tone="warning" title={`You have ${pendingCount} unpaid invoices.`}>
-                   <p>Action may be required to collect payments.</p>
-                </Banner>
-            )}
-            {pendingCount === 0 && overdueCount === 0 && (
-                <Banner tone="success" title="All caught up!">
-                    <p>You have no outstanding debt to collect.</p>
-                </Banner>
-            )}
-          </Layout.Section>
+      <Layout>
+        {/* 1. PLAN STATUS CARD */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <InlineStack align="space-between" blockAlign="center">
+                <Text variant="headingMd" as="h2">Subscription Status</Text>
+                {isFree ? (
+                    <Badge tone="info">Starter Plan</Badge>
+                ) : (
+                    <Badge tone="success">Pro Plan Active</Badge>
+                )}
+              </InlineStack>
 
-          {/* 2. STATS CARDS */}
-          <Layout.Section>
-            <InlineGrid columns={3} gap="400">
-              
-              <Card>
-                <BlockStack gap="200">
-                  <Text as="h2" variant="headingSm">Total Receivables</Text>
-                  <Text as="p" variant="heading2xl" fontWeight="bold">
-                    {formatMoney(totalDue)}
-                  </Text>
-                  <Text as="p" variant="bodySm" tone="subdued">Total outstanding amount</Text>
-                </BlockStack>
-              </Card>
+              <BlockStack gap="200">
+                <Text variant="bodyMd" as="p">
+                  {isFree 
+                    ? "You are currently limited to 5 Net Terms customers." 
+                    : "You have unlimited access to Net Terms, Email Automation, and Data Exports."
+                  }
+                </Text>
+                {isFree && (
+                   <Button url="/app/pricing" variant="primary">Upgrade to Pro</Button>
+                )}
+              </BlockStack>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
 
-              <Card>
-                <BlockStack gap="200">
-                  <Text as="h2" variant="headingSm">Pending Invoices</Text>
-                  <Text as="p" variant="heading2xl" fontWeight="bold">
-                    {pendingCount}
-                  </Text>
-                  <Text as="p" variant="bodySm" tone="subdued">Awaiting payment</Text>
-                </BlockStack>
-              </Card>
+        {/* 2. QUICK ACTIONS */}
+        <Layout.Section variant="oneHalf">
+          <Card>
+            <BlockStack gap="200">
+                <InlineStack gap="200" blockAlign="center">
+                    <div style={{ padding: '8px', background: '#f1f8f5', borderRadius: '8px' }}>
+                        <CreditCardIcon width={24} />
+                    </div>
+                    <Text variant="headingSm" as="h3">Net Terms Manager</Text>
+                </InlineStack>
+                <Text variant="bodyMd" as="p">Approve or revoke Net 30 status for your wholesale customers.</Text>
+                <Button url="/app/net-terms" fullWidth>Manage Customers</Button>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
 
-              <Card>
-                <BlockStack gap="200">
-                  <Text as="h2" variant="headingSm">Total Orders</Text>
-                  <Text as="p" variant="heading2xl" fontWeight="bold">
-                    {totalCount}
-                  </Text>
-                  <Text as="p" variant="bodySm" tone="subdued">Lifetime Net Terms orders</Text>
-                </BlockStack>
-              </Card>
+        <Layout.Section variant="oneHalf">
+          <Card>
+            <BlockStack gap="200">
+                <InlineStack gap="200" blockAlign="center">
+                    <div style={{ padding: '8px', background: '#f1f8f5', borderRadius: '8px' }}>
+                         <ReceiptIcon width={24} />
+                    </div>
+                    <Text variant="headingSm" as="h3">Invoices</Text>
+                    {pendingInvoices > 0 && <Badge tone="warning">{pendingInvoices} Pending</Badge>}
+                </InlineStack>
+                <Text variant="bodyMd" as="p">Track payments, download PDFs, and manage collections.</Text>
+                <Button url="/app/invoices" fullWidth>View Invoices</Button>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
 
-            </InlineGrid>
-          </Layout.Section>
-
-          {/* 3. QUICK NAVIGATION */}
-          <Layout.Section>
-            <Card>
-                <BlockStack gap="400">
-                    <Text as="h2" variant="headingMd">Quick Actions</Text>
-                    <Divider />
-                    <InlineGrid columns={3} gap="400">
-                        
-                        {/* THE ENFORCER BUTTON */}
-                        <Box padding="400" background="bg-surface-secondary" borderRadius="200">
-                            <BlockStack gap="200">
-                                <Text as="h3" variant="headingSm">Compliance Check</Text>
-                                <p>Scan for overdue invoices and revoke access automatically.</p>
-                                <fetcher.Form method="post" action="/app/run_compliance">
-                                    <Button submit loading={isRunningCheck} tone="critical">
-                                        Run Compliance Check
-                                    </Button>
-                                </fetcher.Form>
-                            </BlockStack>
-                        </Box>
-
-                        <Box padding="400" background="bg-surface-secondary" borderRadius="200">
-                            <BlockStack gap="200">
-                                <Text as="h3" variant="headingSm">Manage Access</Text>
-                                <p>Approve or revoke Net Terms access for specific customers.</p>
-                                <Button url="/app/net-terms">Go to Manager</Button>
-                            </BlockStack>
-                        </Box>
-
-                        <Box padding="400" background="bg-surface-secondary" borderRadius="200">
-                            <BlockStack gap="200">
-                                <Text as="h3" variant="headingSm">View Ledger</Text>
-                                <p>See all invoices, check due dates, and mark orders as paid.</p>
-                                <Button url="/app/invoices">View Invoices</Button>
-                            </BlockStack>
-                        </Box>
-
-                    </InlineGrid>
-                </BlockStack>
-            </Card>
-          </Layout.Section>
-
-        </Layout>
-      </BlockStack>
+        {/* 3. SETUP REMINDER (Footer) */}
+        <Layout.Section>
+             <Box paddingBlockStart="400">
+                 <Banner title="One-time Setup Required" tone="info" icon={SettingsIcon}>
+                    <p>
+                        If you haven't already, ensure you have created the <strong>"Net Terms"</strong> manual payment method in your 
+                        <Link to="shopify:admin/settings/payments" target="_blank" rel="noopener noreferrer"> Shopify Payment Settings</Link>.
+                    </p>
+                 </Banner>
+             </Box>
+        </Layout.Section>
+      </Layout>
     </Page>
   );
 }

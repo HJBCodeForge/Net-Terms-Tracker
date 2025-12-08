@@ -11,14 +11,19 @@ import {
   Badge,
   Button,
   InlineStack,
-  Banner
+  Banner,
+  ProgressBar,
+  BlockStack,
+  Box
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
+import db from "../db.server"; // Import DB to check plan
 
 // 1. LOADER
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
 
+  // A. Fetch Customers
   const response = await admin.graphql(
     `#graphql
     query getCustomers {
@@ -49,12 +54,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     };
   });
 
-  return json({ customers });
+  // B. Calculate "Active" Count
+  const approvedCount = customers.filter((c: any) => c.isApproved).length;
+
+  // C. Fetch Shop Plan from DB
+  const shopRecord = await db.shop.findUnique({
+    where: { shop: session.shop },
+  });
+  const plan = shopRecord?.plan || "FREE";
+
+  return json({ customers, approvedCount, plan });
 };
 
-// 2. ACTION (LOUD DEBUG VERSION)
+// 2. ACTION (With Gatekeeper Logic)
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
   
   const customerId = formData.get("customerId") as string;
@@ -62,7 +76,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   console.log(`[Debug] Processing ${intent} for ID: ${customerId}`);
 
-  if (!customerId) return json({ status: "error" });
+  if (!customerId) return json({ status: "error", message: "Missing Customer ID" });
+
+  // --- GATEKEEPER LOGIC START ---
+  if (intent === "approve") {
+    const shopRecord = await db.shop.findUnique({
+      where: { shop: session.shop },
+    });
+
+    const plan = shopRecord?.plan || "FREE";
+
+    if (plan === "FREE") {
+      // Re-count active users from Shopify to be safe
+      const countResponse = await admin.graphql(
+        `#graphql
+        query countApproved {
+          customers(first: 10, query: "tag:Net30_Approved") {
+            edges { node { id } }
+          }
+        }`
+      );
+      const countData = await countResponse.json();
+      const currentCount = countData.data.customers.edges.length;
+
+      // STRICT LIMIT: 5
+      if (currentCount >= 5) {
+        return json({ 
+            status: "error", 
+            message: "Free Plan Limit Reached (5/5). Upgrade to Approve." 
+        });
+      }
+    }
+  }
+  // --- GATEKEEPER LOGIC END ---
 
   const TAG = "Net30_Approved";
   
@@ -91,45 +137,89 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     const responseJson = await response.json();
-
-    // --- THE LOUD LOGGING SECTION ---
-    console.log("========================================");
-    console.log("SHOPIFY API RESPONSE:");
-    console.log(JSON.stringify(responseJson, null, 2));
-    console.log("========================================");
-    // --------------------------------
-
     return json({ status: "success", data: responseJson });
 
-  } catch (error) {
+  } catch (error: any) {
     console.log("CRITICAL ERROR:", error);
     return json({ status: "error", message: error.message });
   }
 };
 
-// 3. UI COMPONENT (UPDATED WITH HIDDEN INPUT)
+// 3. UI COMPONENT
 export default function NetTermsManager() {
-  const { customers } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher();
+  const { customers, plan, approvedCount } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<any>();
+
+  // Check if we just hit an error
+  const isLimitError = fetcher.data?.status === "error";
+  const errorMessage = fetcher.data?.message;
+
+  // Plan Visuals
+  const limit = 5;
+  const isFree = plan === "FREE";
+  // Avoid division by zero if limit is weird, cap at 100%
+  const usagePercent = isFree ? Math.min(100, (approvedCount / limit) * 100) : 0;
 
   return (
     <Page 
       title="Net Terms Manager"
       backAction={{ content: "Dashboard", url: "/app" }}
       secondaryActions={[
-        { 
-            content: "View Invoices", url: "/app/invoices" 
-        },
-        {
-            content: "Dashboard", url: "/app"
-        }
+        { content: "View Invoices", url: "/app/invoices" },
+        { content: "Dashboard", url: "/app" }
       ]}
     >
       <Layout>
         <Layout.Section>
-           <Banner title="Gatekeeper Active">
-             <p>Customers with the <strong>Net 30 Active</strong> badge will see the Net Terms payment option at checkout.</p>
-           </Banner>
+            {/* 1. GATEKEEPER ERROR BANNER */}
+            {isLimitError && (
+              <div style={{ marginBottom: "1rem" }}>
+                 <Banner tone="critical" title="Upgrade Required">
+                   <p>{errorMessage}</p>
+                   <Button url="/app/pricing" variant="plain">View Plans</Button>
+                 </Banner>
+              </div>
+            )}
+
+            {/* 2. PLAN STATUS CARD (Handles Both Free & Paid) */}
+            <div style={{ marginBottom: "1rem" }}>
+                <Card>
+                    <BlockStack gap="400">
+                        <InlineStack align="space-between">
+                            <Text variant="headingSm" as="h3">Current Plan: {plan}</Text>
+                            {isFree ? (
+                                <Badge tone="info">Starter</Badge>
+                            ) : (
+                                <Badge tone="success">Active</Badge>
+                            )}
+                        </InlineStack>
+
+                        {isFree ? (
+                            // FREE VIEW: Usage Meter
+                            <BlockStack gap="200">
+                                <InlineStack align="space-between">
+                                    <Text variant="bodySm" as="span">Usage: {approvedCount} / {limit} Customers</Text>
+                                    <Button url="/app/pricing" variant="plain" size="micro">Upgrade for Unlimited</Button>
+                                </InlineStack>
+                                <ProgressBar progress={usagePercent} tone={approvedCount >= 5 ? "critical" : "primary"} />
+                            </BlockStack>
+                        ) : (
+                            // PAID VIEW: Unlimited Badge
+                            <Banner tone="success">
+                                <Text variant="bodyMd" as="p">
+                                    ✅ You have <strong>Unlimited</strong> Net Terms approvals.
+                                </Text>
+                            </Banner>
+                        )}
+                    </BlockStack>
+                </Card>
+            </div>
+
+            <div style={{ marginBottom: "1rem" }}>
+                 <Banner title="Gatekeeper Active">
+                   <p>Customers with the <strong>Net 30 Active</strong> badge will see the Net Terms payment option at checkout.</p>
+                 </Banner>
+            </div>
         </Layout.Section>
 
         <Layout.Section>
@@ -137,13 +227,11 @@ export default function NetTermsManager() {
             <ResourceList
               resourceName={{ singular: "customer", plural: "customers" }}
               items={customers}
-              renderItem={(item) => {
+              renderItem={(item: any) => {
                 const { id, name, email, initials, isApproved } = item;
                 const media = <Avatar customer size="md" name={name} initials={initials} />;
 
                 const isSubmitting = fetcher.formData?.get("customerId") === id;
-                
-                // Logic: If they are approved, next action is 'revoke'. If not, 'approve'.
                 const nextIntent = isApproved ? "revoke" : "approve";
 
                 return (
@@ -169,16 +257,15 @@ export default function NetTermsManager() {
                         <div style={{ width: "30%", textAlign: "right" }}>
                            <fetcher.Form method="post">
                                <input type="hidden" name="customerId" value={id} />
-                               {/* THE FIX: Explicitly set the intent in a hidden field */}
                                <input type="hidden" name="intent" value={nextIntent} />
                                
                                {isApproved ? (
                                    <Button submit variant="primary" tone="critical" loading={isSubmitting}>
-                                       Revoke Access
+                                        Revoke Access
                                    </Button>
                                ) : (
                                    <Button submit variant="primary" loading={isSubmitting}>
-                                       Approve Net 30
+                                        Approve Net 30
                                    </Button>
                                )}
                            </fetcher.Form>

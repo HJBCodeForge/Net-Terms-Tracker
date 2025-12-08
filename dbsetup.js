@@ -6,15 +6,17 @@ import fs from 'node:fs'
 
 const env = { ...process.env }
 
-// place Sqlite3 database on volume
-const source = path.resolve('/dev.sqlite')
-const target = '/data/' + path.basename(source)
-if (!fs.existsSync(source) && fs.existsSync('/data')) fs.symlinkSync(target, source)
+// Ensure DATABASE_URL is set to the volume path
+env.DATABASE_URL = "file:/data/dev.sqlite"
+console.log("Setting DATABASE_URL to:", env.DATABASE_URL);
 
 // prepare database
+console.log("Running migrations...");
 await exec('npx prisma migrate deploy')
+console.log("Migrations complete.");
 
 // launch application
+console.log("Starting application...");
 await exec(process.argv.slice(2).join(' '))
 
 function exec(command) {

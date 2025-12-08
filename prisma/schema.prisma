@@ -35,6 +35,7 @@ model Session {
 
 model Invoice {
   id            String   @id @default(uuid())
+  shop          String
   orderId       String   @unique
   orderNumber   String
   customerId    String

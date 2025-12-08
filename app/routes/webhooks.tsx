@@ -3,6 +3,7 @@ import { authenticate } from "../shopify.server";
 import db from "../db.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  // We extract 'shop' from the webhook context here
   const { topic, shop, session, admin, payload } = await authenticate.webhook(request);
 
   if (!admin) {
@@ -23,12 +24,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         date.setDate(date.getDate() + 30); // Add 30 days
 
         // 2. Save to Database (Upsert prevents duplicates if webhook fires twice)
-        // We use order.admin_graphql_api_id because it's the global ID used in API calls
         try {
             await db.invoice.upsert({
                 where: { orderId: order.admin_graphql_api_id },
                 update: {}, // If it exists, do nothing
                 create: {
+                    shop: shop, // <--- CRITICAL FIX: Save the shop domain
                     orderId: order.admin_graphql_api_id,
                     orderNumber: `${order.order_number}`,
                     customerId: `${order.customer?.id || 'unknown'}`,
