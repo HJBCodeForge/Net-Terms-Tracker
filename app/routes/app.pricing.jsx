@@ -1,30 +1,22 @@
 import { json } from "@remix-run/node";
 import { useLoaderData, useSubmit, useActionData } from "@remix-run/react";
-import { Page, Layout, Card, Text, Button, BlockStack, Box, InlineGrid, Badge } from "@shopify/polaris";
+import { Page, Layout, Card, Text, Button, BlockStack, Box, InlineGrid, Badge, Divider, List, InlineStack } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { createSubscription, checkSubscription, cancelSubscription } from "../billing.server";
 import { useEffect } from "react";
 
-// app/routes/app.pricing.jsx
-
+// LOADER & ACTION (Preserved)
 export const loader = async ({ request }) => {
   const url = new URL(request.url);
   const shopParam = url.searchParams.get("shop");
   const chargeId = url.searchParams.get("charge_id");
 
-  // PRESERVED FIX: If returning from billing, send signal to client instead of server-redirect
   if (shopParam && chargeId) {
-    console.log(`[Pricing] Billing complete. Redirecting to OAuth for ${shopParam}`);
-    return json({ 
-      billingComplete: true, 
-      shop: shopParam,
-      appUrl: process.env.SHOPIFY_APP_URL 
-    });
+    return json({ billingComplete: true, shop: shopParam, appUrl: process.env.SHOPIFY_APP_URL });
   }
 
   const { session } = await authenticate.admin(request);
   const currentPlan = await checkSubscription(request);
-
   return json({ currentPlan });
 };
 
@@ -33,144 +25,116 @@ export const action = async ({ request }) => {
   const formData = await request.formData();
   const desiredPlan = formData.get("plan");
 
-  console.log(`[Pricing] User requested: ${desiredPlan}`);
-
-  // --- NEW: Downgrade Logic ---
   if (desiredPlan === "FREE") {
     await cancelSubscription(request, session.shop);
     return json({ status: "success" });
   }
 
-  // --- EXISTING: Upgrade Logic ---
   if (desiredPlan === "GROWTH" || desiredPlan === "PRO") {
     const confirmUrl = await createSubscription(request, session.shop, desiredPlan);
-    
-    console.log(`[Pricing] Generated confirmation URL: ${confirmUrl}`);
-
-    if (confirmUrl) {
-      // Return the URL to the client so it can "break out" of the iframe
-      return json({ confirmUrl }); 
-    }
+    if (confirmUrl) return json({ confirmUrl }); 
   }
-
   return json({ status: "error" });
 };
 
 export default function PricingPage() {
-  const loaderData = useLoaderData(); // Use loaderData to check for billing completion
+  const loaderData = useLoaderData(); 
   const actionData = useActionData();
   const submit = useSubmit();
 
-  // Client-Side Redirect to break out of iframe (For Upgrade Start)
   useEffect(() => {
-    if (actionData?.confirmUrl) {
-      window.top.location.href = actionData.confirmUrl;
-    }
+    if (actionData?.confirmUrl) window.top.location.href = actionData.confirmUrl;
   }, [actionData]);
 
-  // Handle post-billing redirect (For Upgrade Return)
   useEffect(() => {
     if (loaderData?.billingComplete && loaderData?.shop) {
       const targetUrl = `${loaderData.appUrl}/auth/login?shop=${loaderData.shop}`;
-      console.log(`[Pricing] Client-side redirecting to ${targetUrl}`);
-      try {
-        window.open(targetUrl, "_top");
-      } catch (e) {
-        console.error("Automatic redirect failed:", e);
-      }
+      try { window.open(targetUrl, "_top"); } catch (e) { console.error(e); }
     }
   }, [loaderData]);
 
-  // Render Fallback UI if automatic redirect fails
   if (loaderData?.billingComplete) {
     const targetUrl = `${loaderData.appUrl}/auth/login?shop=${loaderData.shop}`;
     return (
       <Page>
-        <Layout>
-          <Layout.Section>
-            <Card>
-              <BlockStack gap="400" align="center">
-                <Text as="h2" variant="headingMd">Billing confirmed!</Text>
-                <Text>Redirecting you back to the app...</Text>
-                <Button url={targetUrl} target="_top" variant="primary">
-                   Click here if you are not redirected
-                </Button>
-              </BlockStack>
-            </Card>
-          </Layout.Section>
-        </Layout>
+        <Layout><Layout.Section><Card><Text>Redirecting...</Text><Button url={targetUrl}>Click here</Button></Card></Layout.Section></Layout>
       </Page>
     );
   }
 
-  const { currentPlan } = loaderData; // Extract plan from loader
+  const { currentPlan } = loaderData;
+  const handlePlanSelect = (plan) => submit({ plan }, { method: "POST" });
 
-  const handlePlanSelect = (plan) => {
-    submit({ plan }, { method: "POST" });
-  };
-
-  const PlanCard = ({ tier, title, price, features }) => {
+  const PlanCard = ({ tier, title, price, features, recommended = false }) => {
     const isActive = currentPlan === tier;
     const isFree = tier === "FREE";
-    // NEW: Allow downgrading if I am on a paid plan but looking at Free
     const isDowngrade = !isActive && isFree; 
 
     return (
-      <Card>
-        <BlockStack gap="400">
-          <BlockStack gap="200">
-            <Text as="h2" variant="headingLg">
-              {title}
-              {isActive && <Badge tone="success"> Current Plan</Badge>}
-            </Text>
-            <Text as="p" variant="heading2xl" fontWeight="bold">
-              ${price}<span style={{fontSize: "0.5em"}}>/mo</span>
-            </Text>
-          </BlockStack>
-          
-          <Box minHeight="150px">
+      <div style={recommended ? { transform: 'scale(1.02)', border: '2px solid #008060', borderRadius: '10px' } : {}}>
+        <Card background={recommended ? "bg-surface-secondary" : "bg-surface"}>
+            <BlockStack gap="400">
             <BlockStack gap="200">
-              {features.map((f, i) => (
-                <Text key={i} as="p" variant="bodyMd">✓ {f}</Text>
-              ))}
+                <InlineStack align="space-between">
+                    <Text as="h2" variant="headingLg">{title}</Text>
+                    {recommended && !isActive && <Badge tone="success">Most Popular</Badge>}
+                    {isActive && <Badge tone="info">Current</Badge>}
+                </InlineStack>
+                <Text as="p" variant="heading3xl" fontWeight="bold">
+                ${price}<span style={{fontSize: "0.5em", color: "#6D7175", fontWeight: "normal"}}>/mo</span>
+                </Text>
             </BlockStack>
-          </Box>
+            
+            <Divider />
 
-          <Button 
-            variant={isActive ? "secondary" : "primary"} 
-            disabled={isActive}
-            // Updated click handler to allow downgrades
-            onClick={() => !isActive && handlePlanSelect(tier)}
-          >
-            {isActive ? "Active" : isDowngrade ? "Downgrade to Free" : `Upgrade to ${title}`}
-          </Button>
-        </BlockStack>
-      </Card>
+            <Box minHeight="200px">
+                <BlockStack gap="300">
+                {features.map((f, i) => (
+                    <InlineStack key={i} gap="200" blockAlign="start">
+                        <span style={{color: "#008060"}}>✓</span>
+                        <Text as="span" variant="bodyMd">{f}</Text>
+                    </InlineStack>
+                ))}
+                </BlockStack>
+            </Box>
+
+            <Button 
+                variant={isActive ? "secondary" : recommended ? "primary" : "secondary"} 
+                disabled={isActive}
+                onClick={() => !isActive && handlePlanSelect(tier)}
+                fullWidth
+            >
+                {isActive ? "Active Plan" : isDowngrade ? "Downgrade" : `Select ${title}`}
+            </Button>
+            </BlockStack>
+        </Card>
+      </div>
     );
   };
 
   return (
-    <Page title="Subscription Plans" backAction={{ content: "Dashboard", url: "/app" }}>
+    <Page title="Plans & Pricing" subtitle="Choose the right plan for your wholesale business.">
       <Layout>
         <Layout.Section>
-            <InlineGrid columns={3} gap="400">
+            <InlineGrid columns={{xs: 1, md: 3}} gap="400" alignItems="start">
                 <PlanCard 
                     tier="FREE" 
-                    title="Free Tier" 
+                    title="Starter" 
                     price="0" 
-                    features={["5 Net Terms Customers", "Manual Approval", "Basic Support"]} 
+                    features={["5 Net Terms Customers", "Manual Approval", "Email Support"]} 
                 />
                 <PlanCard 
                     tier="GROWTH" 
                     title="Growth" 
                     price="19" 
-                    features={["Unlimited Customers", "Automated Email Reminders", "Standard Support"]} 
+                    recommended={true}
+                    features={["Unlimited Customers", "Automated Email Reminders", "Priority Support", "Remove Branding"]} 
                 />
                 <PlanCard 
                     tier="PRO" 
                     title="Pro" 
                     price="49" 
-                    features={["Everything in Growth", "PDF Invoice Generation", "CSV Data Exports", "Priority Support"]} 
+                    features={["Everything in Growth", "PDF Invoice Generation", "Bulk CSV Data Exports", "Dedicated Account Manager"]} 
                 />
             </InlineGrid>
         </Layout.Section>

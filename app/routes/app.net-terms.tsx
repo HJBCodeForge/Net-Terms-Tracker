@@ -14,16 +14,16 @@ import {
   Banner,
   ProgressBar,
   BlockStack,
-  Box
+  Box,
+  Tooltip,
 } from "@shopify/polaris";
+import { AlertCircleIcon } from "@shopify/polaris-icons";
 import { authenticate } from "../shopify.server";
-import db from "../db.server"; // Import DB to check plan
+import db from "../db.server"; 
 
-// 1. LOADER
+// 1. LOADER (Preserved)
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
-
-  // A. Fetch Customers
   const response = await admin.graphql(
     `#graphql
     query getCustomers {
@@ -40,9 +40,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }
     }`
   );
-
   const data = await response.json();
-  
   const customers = (data.data?.customers?.edges || []).map((edge: any) => {
     const node = edge.node;
     return {
@@ -53,65 +51,37 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       initials: (node.firstName?.[0] || "") + (node.lastName?.[0] || "")
     };
   });
-
-  // B. Calculate "Active" Count
   const approvedCount = customers.filter((c: any) => c.isApproved).length;
-
-  // C. Fetch Shop Plan from DB
-  const shopRecord = await db.shop.findUnique({
-    where: { shop: session.shop },
-  });
+  const shopRecord = await db.shop.findUnique({ where: { shop: session.shop } });
   const plan = shopRecord?.plan || "FREE";
-
   return json({ customers, approvedCount, plan });
 };
 
-// 2. ACTION (With Gatekeeper Logic)
+// 2. ACTION (Preserved)
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const formData = await request.formData();
-  
   const customerId = formData.get("customerId") as string;
   const intent = formData.get("intent"); 
 
-  console.log(`[Debug] Processing ${intent} for ID: ${customerId}`);
-
-  if (!customerId) return json({ status: "error", message: "Missing Customer ID" });
-
-  // --- GATEKEEPER LOGIC START ---
   if (intent === "approve") {
-    const shopRecord = await db.shop.findUnique({
-      where: { shop: session.shop },
-    });
-
+    const shopRecord = await db.shop.findUnique({ where: { shop: session.shop } });
     const plan = shopRecord?.plan || "FREE";
-
     if (plan === "FREE") {
-      // Re-count active users from Shopify to be safe
       const countResponse = await admin.graphql(
         `#graphql
         query countApproved {
-          customers(first: 10, query: "tag:Net30_Approved") {
-            edges { node { id } }
-          }
+          customers(first: 10, query: "tag:Net30_Approved") { edges { node { id } } }
         }`
       );
       const countData = await countResponse.json();
-      const currentCount = countData.data.customers.edges.length;
-
-      // STRICT LIMIT: 5
-      if (currentCount >= 5) {
-        return json({ 
-            status: "error", 
-            message: "Free Plan Limit Reached (5/5). Upgrade to Approve." 
-        });
+      if (countData.data.customers.edges.length >= 5) {
+        return json({ status: "error", message: "Free Limit (5) Reached. Upgrade to add more." });
       }
     }
   }
-  // --- GATEKEEPER LOGIC END ---
 
   const TAG = "Net30_Approved";
-  
   const mutation = intent === "approve" 
     ? `#graphql
       mutation addTags($id: ID!, $tags: [String!]!) {
@@ -137,6 +107,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     const responseJson = await response.json();
+    
+    if (responseJson.data?.tagsAdd?.userErrors?.length > 0) {
+        return json({ status: "error", message: responseJson.data.tagsAdd.userErrors[0].message });
+    }
+    if (responseJson.data?.tagsRemove?.userErrors?.length > 0) {
+        return json({ status: "error", message: responseJson.data.tagsRemove.userErrors[0].message });
+    }
+
     return json({ status: "success", data: responseJson });
 
   } catch (error: any) {
@@ -150,126 +128,113 @@ export default function NetTermsManager() {
   const { customers, plan, approvedCount } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<any>();
 
-  // Check if we just hit an error
   const isLimitError = fetcher.data?.status === "error";
   const errorMessage = fetcher.data?.message;
 
-  // Plan Visuals
   const limit = 5;
   const isFree = plan === "FREE";
-  // Avoid division by zero if limit is weird, cap at 100%
   const usagePercent = isFree ? Math.min(100, (approvedCount / limit) * 100) : 0;
+  const isAtLimit = isFree && approvedCount >= limit;
 
   return (
     <Page 
       title="Net Terms Manager"
+      subtitle="Control who can pay later."
       backAction={{ content: "Dashboard", url: "/app" }}
-      secondaryActions={[
-        { content: "View Invoices", url: "/app/invoices" },
-        { content: "Dashboard", url: "/app" }
-      ]}
+      secondaryActions={[{ content: "View Invoices", url: "/app/invoices" }]}
     >
       <Layout>
+        {/* 1. CAPACITY & STATUS */}
         <Layout.Section>
-            {/* 1. GATEKEEPER ERROR BANNER */}
             {isLimitError && (
-              <div style={{ marginBottom: "1rem" }}>
-                 <Banner tone="critical" title="Upgrade Required">
+              <Box paddingBlockEnd="400">
+                 <Banner tone="critical" title="Limit Reached" onDismiss={() => {}}>
                    <p>{errorMessage}</p>
-                   <Button url="/app/pricing" variant="plain">View Plans</Button>
                  </Banner>
-              </div>
+              </Box>
             )}
 
-            {/* 2. PLAN STATUS CARD (Handles Both Free & Paid) */}
-            <div style={{ marginBottom: "1rem" }}>
+            {isFree ? (
                 <Card>
-                    <BlockStack gap="400">
+                    <BlockStack gap="300">
                         <InlineStack align="space-between">
-                            <Text variant="headingSm" as="h3">Current Plan: {plan}</Text>
-                            {isFree ? (
-                                <Badge tone="info">Starter</Badge>
-                            ) : (
-                                <Badge tone="success">Active</Badge>
-                            )}
+                            <Text variant="headingSm" as="h3">Starter Plan Capacity</Text>
+                            <Text variant="bodySm" as="span" tone={isAtLimit ? "critical" : "subdued"}>
+                                {approvedCount} / {limit} Customers
+                            </Text>
                         </InlineStack>
-
-                        {isFree ? (
-                            // FREE VIEW: Usage Meter
-                            <BlockStack gap="200">
-                                <InlineStack align="space-between">
-                                    <Text variant="bodySm" as="span">Usage: {approvedCount} / {limit} Customers</Text>
-                                    <Button url="/app/pricing" variant="plain" size="micro">Upgrade for Unlimited</Button>
+                        <ProgressBar 
+                            progress={usagePercent} 
+                            tone={isAtLimit ? "critical" : "primary"} 
+                            size="small"
+                        />
+                        {isAtLimit && (
+                            <Banner tone="info">
+                                <InlineStack align="space-between" blockAlign="center">
+                                    <p>You have reached the limit of the Starter plan.</p>
+                                    <Button url="/app/pricing" size="micro">Upgrade to Pro</Button>
                                 </InlineStack>
-                                <ProgressBar progress={usagePercent} tone={approvedCount >= 5 ? "critical" : "primary"} />
-                            </BlockStack>
-                        ) : (
-                            // PAID VIEW: Unlimited Badge
-                            <Banner tone="success">
-                                <Text variant="bodyMd" as="p">
-                                    ✅ You have <strong>Unlimited</strong> Net Terms approvals.
-                                </Text>
                             </Banner>
                         )}
                     </BlockStack>
                 </Card>
-            </div>
-
-            <div style={{ marginBottom: "1rem" }}>
-                 <Banner title="Gatekeeper Active">
-                   <p>Customers with the <strong>Net 30 Active</strong> badge will see the Net Terms payment option at checkout.</p>
-                 </Banner>
-            </div>
+            ) : (
+                <Banner tone="success" title="Unlimited Access Active">
+                    <p>You are on the <strong>{plan}</strong> plan. No customer limits applied.</p>
+                </Banner>
+            )}
         </Layout.Section>
 
+        {/* 2. CUSTOMER LIST */}
         <Layout.Section>
-          <Card>
+          <Card padding="0">
             <ResourceList
               resourceName={{ singular: "customer", plural: "customers" }}
               items={customers}
+              emptyState={
+                  <div style={{ padding: '2rem', textAlign: 'center' }}>
+                      <Text variant="headingMd" as="h3">No customers found</Text>
+                      <p>Your 20 most recent customers will appear here.</p>
+                  </div>
+              }
               renderItem={(item: any) => {
                 const { id, name, email, initials, isApproved } = item;
-                const media = <Avatar customer size="md" name={name} initials={initials} />;
-
                 const isSubmitting = fetcher.formData?.get("customerId") === id;
                 const nextIntent = isApproved ? "revoke" : "approve";
 
                 return (
                   <ResourceItem
                     id={id}
-                    media={media}
+                    media={<Avatar customer size="md" name={name} initials={initials} />}
                     accessibilityLabel={`View details for ${name}`}
+                    onClick={() => {}}
                   >
                     <InlineStack align="space-between" blockAlign="center">
-                        <div style={{ width: "40%"}}>
+                        <BlockStack gap="050">
                             <Text variant="bodyMd" fontWeight="bold" as="h3">{name}</Text>
                             <Text variant="bodySm" as="p" tone="subdued">{email}</Text>
-                        </div>
+                        </BlockStack>
 
-                        <div style={{ width: "20%"}}>
-                            {isApproved ? (
-                                <Badge tone="success">Net 30 Active</Badge>
-                            ) : (
-                                <Badge tone="critical">Not Approved</Badge>
-                            )}
-                        </div>
-
-                        <div style={{ width: "30%", textAlign: "right" }}>
-                           <fetcher.Form method="post">
-                               <input type="hidden" name="customerId" value={id} />
-                               <input type="hidden" name="intent" value={nextIntent} />
-                               
-                               {isApproved ? (
-                                   <Button submit variant="primary" tone="critical" loading={isSubmitting}>
-                                        Revoke Access
+                        <InlineStack gap="400" blockAlign="center">
+                            {isApproved && <Badge tone="success">Net 30 Active</Badge>}
+                            
+                            <div style={{ minWidth: '100px', textAlign: 'right' }}>
+                               <fetcher.Form method="post">
+                                   <input type="hidden" name="customerId" value={id} />
+                                   <input type="hidden" name="intent" value={nextIntent} />
+                                   <Button 
+                                        submit 
+                                        size="slim"
+                                        variant={isApproved ? "secondary" : "primary"} 
+                                        tone={isApproved ? "critical" : undefined}
+                                        loading={isSubmitting}
+                                        disabled={!isApproved && isAtLimit}
+                                    >
+                                        {isApproved ? "Revoke" : "Approve"}
                                    </Button>
-                               ) : (
-                                   <Button submit variant="primary" loading={isSubmitting}>
-                                        Approve Net 30
-                                   </Button>
-                               )}
-                           </fetcher.Form>
-                        </div>
+                               </fetcher.Form>
+                            </div>
+                        </InlineStack>
                     </InlineStack>
                   </ResourceItem>
                 );
