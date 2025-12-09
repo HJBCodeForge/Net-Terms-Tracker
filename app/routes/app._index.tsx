@@ -1,5 +1,6 @@
 import { json, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, Link } from "@remix-run/react";
+import { useState } from "react";
 import {
   Page,
   Layout,
@@ -13,6 +14,8 @@ import {
   Box,
   InlineGrid,
   Divider,
+  Modal,
+  Image,
 } from "@shopify/polaris";
 import { CreditCardIcon, ReceiptIcon, SettingsIcon, LockIcon } from "@shopify/polaris-icons";
 import { authenticate } from "../shopify.server";
@@ -30,7 +33,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { shop: session.shop, status: "PENDING" }
   });
 
-  // 3. AUTO-ACTIVATE PAYMENT RULE (Logic Preserved)
+  // 3. AUTO-ACTIVATE PAYMENT RULE
   const customizationsResponse = await admin.graphql(
     `#graphql
     query {
@@ -42,8 +45,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const customizationsData = await customizationsResponse.json();
   const existingCustomization = customizationsData.data?.paymentCustomizations?.nodes?.[0];
 
+  // Logic to create the rule if it doesn't exist (Preserved from your original code)
   if (!existingCustomization) {
-    // ... (Existing creation logic preserved) ...
     const functionsResponse = await admin.graphql(
       `#graphql
       query {
@@ -75,24 +78,112 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  return json({ plan, pendingInvoices });
+  // Pass this flag to the UI to optionally hide the banner if they are already set up
+  const isSetupComplete = !!existingCustomization?.enabled;
+
+  return json({ plan, pendingInvoices, isSetupComplete });
 };
 
 export default function Index() {
-  const { plan, pendingInvoices } = useLoaderData<typeof loader>();
+  const { plan, pendingInvoices, isSetupComplete } = useLoaderData<typeof loader>();
+  const [modalOpen, setModalOpen] = useState(false);
   
   const isFree = plan === "FREE";
   const isPro = plan === "PRO";
 
+  // --- SETUP GUIDE MODAL COMPONENT ---
+  const SetupGuideModal = () => (
+    <Modal
+      open={modalOpen}
+      onClose={() => setModalOpen(false)}
+      title="How to Enable Net Terms"
+      primaryAction={{
+        content: 'Open Payment Settings',
+        url: 'shopify:admin/settings/payments',
+        external: true, // Opens in new tab so they don't lose the guide
+      }}
+      secondaryActions={[
+        {
+          content: 'Close',
+          onAction: () => setModalOpen(false),
+        },
+      ]}
+      size="large"
+    >
+      <Modal.Section>
+        <BlockStack gap="800">
+            <Banner tone="info">
+                <p>Keep this window open while you follow the steps in your Settings tab.</p>
+            </Banner>
+
+            {/* STEP 1 */}
+            <BlockStack gap="400">
+                <Text variant="headingMd" as="h3">Step 1: Navigate to Payment Settings</Text>
+                <Text as="p">Go to your Shopify Admin. Click <strong>Settings</strong> (bottom left), then select <strong>Payments</strong>.</Text>
+                <Box padding="200" background="bg-surface-secondary" borderRadius="200" shadow="200">
+                     <Image source="/setup-1.jpg" alt="Step 1: Settings Menu" width="100%" />
+                </Box>
+            </BlockStack>
+            <Divider />
+
+            {/* STEP 2 */}
+            <BlockStack gap="400">
+                <Text variant="headingMd" as="h3">Step 2: Add Manual Payment Method</Text>
+                <Text as="p">Scroll down to the <strong>Manual payment methods</strong> section. Click the button <strong>Add manual payment method</strong>.</Text>
+                <Box padding="200" background="bg-surface-secondary" borderRadius="200" shadow="200">
+                     <Image source="/setup-2.jpg" alt="Step 2: Add Method Button" width="100%" />
+                </Box>
+            </BlockStack>
+            <Divider />
+
+            {/* STEP 3 */}
+            <BlockStack gap="400">
+                <Text variant="headingMd" as="h3">Step 3: Choose 'Create custom payment method'</Text>
+                <Text as="p">Select the option labeled <strong>Create custom payment method</strong> from the dropdown list.</Text>
+                <Box padding="200" background="bg-surface-secondary" borderRadius="200" shadow="200">
+                     <Image source="/setup-3.jpg" alt="Step 3: Select Custom" width="100%" />
+                </Box>
+            </BlockStack>
+            <Divider />
+
+            {/* STEP 4 */}
+            <BlockStack gap="400">
+                <Text variant="headingMd" as="h3">Step 4: Name it 'Net Terms'</Text>
+                <Text as="p">Type exactly <strong>Net Terms</strong> into the name field and click <strong>Activate</strong>.</Text>
+                <Box padding="200" background="bg-surface-secondary" borderRadius="200" shadow="200">
+                     <Image source="/setup-4.jpg" alt="Step 4: Activate" width="100%" />
+                </Box>
+            </BlockStack>
+        </BlockStack>
+      </Modal.Section>
+    </Modal>
+  );
+
   return (
     <Page title="Overview">
+      {/* RENDER THE MODAL */}
+      <SetupGuideModal />
+
       <BlockStack gap="600">
         
-        {/* 1. CRITICAL SETUP ACTION (Moved to Top for Visibility) */}
-        <Banner title="Essential Setup Required" tone="info" icon={SettingsIcon}>
+        {/* 1. CRITICAL SETUP ACTION */}
+        {/* We show this banner if setup is NOT complete, or if you prefer, always show it for reference */}
+        <Banner 
+            title="Essential Setup Required" 
+            tone="warning" 
+            icon={SettingsIcon}
+            action={{
+                content: "View Setup Guide", 
+                onAction: () => setModalOpen(true) 
+            }}
+            secondaryAction={{
+                content: "Go to Settings",
+                url: "shopify:admin/settings/payments",
+                external: true
+            }}
+        >
             <p>
-                To offer Net Terms at checkout, you must enable the manual payment method in your 
-                <Link to="shopify:admin/settings/payments" target="_blank" rel="noopener noreferrer"> Shopify Settings</Link>.
+                To offer Net Terms at checkout, you must enable the manual payment method in your settings.
             </p>
         </Banner>
 
@@ -122,7 +213,7 @@ export default function Index() {
                         <BlockStack gap="400">
                              <InlineStack align="space-between" blockAlign="center">
                                 <Text variant="headingSm" as="h3">Current Plan</Text>
-                                <Badge tone={isPro ? "success" : "info"}>{plan} TIER</Badge>
+                                <Badge tone={isPro ? "success" : "info"}>{`${plan} TIER`}</Badge>
                             </InlineStack>
                             
                             <Box paddingBlock="200">

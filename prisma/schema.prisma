@@ -1,13 +1,7 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
 
-// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
-// enough when changing adapters.
-// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
@@ -31,11 +25,14 @@ model Session {
   emailVerified Boolean?  @default(false)
 }
 
-// prisma/schema.prisma
-
 model Invoice {
   id            String   @id @default(uuid())
-  shop          String
+  
+  // RELATIONS
+  // We use the existing 'shop' string field to link to the Shop model
+  shop          String   
+  shopData      Shop     @relation(fields: [shop], references: [shop])
+
   orderId       String   @unique
   orderNumber   String
   customerId    String
@@ -48,20 +45,25 @@ model Invoice {
   createdAt     DateTime @default(now())
 }
 
-// app/prisma/schema.prisma
-
-// Existing Invoice model...
-// model Invoice { ... }
-
-// --- NEW BILLING MODELS ---
-
 model Shop {
   id             String        @id @default(uuid())
-  shop           String        @unique // The myshopify.com domain
+  shop           String        @unique // This is the join key for Invoices
+  
+  // BILLING FIELDS
   plan           PlanTier      @default(FREE)
-  subscriptionId String?       // The Shopify Global ID (gid://shopify/AppSubscription/...)
+  subscriptionId String?
   billingStatus  BillingStatus @default(PENDING)
-  customerCount  Int           @default(0) // Cache to enforce the 5-customer limit
+  customerCount  Int           @default(0)
+  
+  // BRANDING FIELDS (New)
+  brandColor     String        @default("#008060")
+  logoUrl        String?
+  businessName   String?
+  businessAddress String?
+
+  // RELATIONS
+  invoices       Invoice[]
+
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 }
@@ -75,7 +77,7 @@ enum PlanTier {
 enum BillingStatus {
   PENDING
   ACTIVE
-  FROZEN    // Payment failed
+  FROZEN
   CANCELLED
   DECLINED
 }
