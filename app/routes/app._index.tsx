@@ -1,4 +1,4 @@
-import { json, type LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect, type LoaderFunctionArgs } from "@remix-run/node";
 import { useLoaderData, Link } from "@remix-run/react";
 import { useState } from "react";
 import {
@@ -25,15 +25,28 @@ import { checkSubscription } from "../billing.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
 
-  // 1. Sync & Fetch Shop Plan
+  // 1. GATEKEEPER: Check Terms Acceptance
+  // We check the DB. If they haven't accepted terms, we kick them out to the Terms page.
+  const shopRecord = await db.shop.findUnique({
+    where: { shop: session.shop },
+  });
+
+  if (shopRecord && !shopRecord.termsAccepted) {
+    const url = new URL(request.url);
+    url.pathname = "/app/terms";
+    url.searchParams.set("shop", session.shop);
+    throw redirect(url.toString());
+  }
+
+  // 2. Sync & Fetch Shop Plan
   const plan = await checkSubscription(request);
 
-  // 2. Fetch Quick Stats
+  // 3. Fetch Quick Stats
   const pendingInvoices = await db.invoice.count({
     where: { shop: session.shop, status: "PENDING" }
   });
 
-  // 3. AUTO-ACTIVATE PAYMENT RULE
+  // 4. AUTO-ACTIVATE PAYMENT RULE
   const customizationsResponse = await admin.graphql(
     `#graphql
     query {
@@ -45,7 +58,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const customizationsData = await customizationsResponse.json();
   const existingCustomization = customizationsData.data?.paymentCustomizations?.nodes?.[0];
 
-  // Logic to create the rule if it doesn't exist (Preserved from your original code)
   if (!existingCustomization) {
     const functionsResponse = await admin.graphql(
       `#graphql
@@ -121,7 +133,8 @@ export default function Index() {
                 <Text variant="headingMd" as="h3">Step 1: Navigate to Payment Settings</Text>
                 <Text as="p">Go to your Shopify Admin. Click <strong>Settings</strong> (bottom left), then select <strong>Payments</strong>.</Text>
                 <Box padding="200" background="bg-surface-secondary" borderRadius="200" shadow="200">
-                     <Image source="/setup-1.jpg" alt="Step 1: Settings Menu" width="100%" />
+                     {/* Ensure these images exist in your /public folder */}
+                     <Image source="/setup-1.png" alt="Step 1: Settings Menu" width="100%" />
                 </Box>
             </BlockStack>
             <Divider />
@@ -131,7 +144,7 @@ export default function Index() {
                 <Text variant="headingMd" as="h3">Step 2: Add Manual Payment Method</Text>
                 <Text as="p">Scroll down to the <strong>Manual payment methods</strong> section. Click the button <strong>Add manual payment method</strong>.</Text>
                 <Box padding="200" background="bg-surface-secondary" borderRadius="200" shadow="200">
-                     <Image source="/setup-2.jpg" alt="Step 2: Add Method Button" width="100%" />
+                     <Image source="/setup-2.png" alt="Step 2: Add Method Button" width="100%" />
                 </Box>
             </BlockStack>
             <Divider />
@@ -141,7 +154,7 @@ export default function Index() {
                 <Text variant="headingMd" as="h3">Step 3: Choose 'Create custom payment method'</Text>
                 <Text as="p">Select the option labeled <strong>Create custom payment method</strong> from the dropdown list.</Text>
                 <Box padding="200" background="bg-surface-secondary" borderRadius="200" shadow="200">
-                     <Image source="/setup-3.jpg" alt="Step 3: Select Custom" width="100%" />
+                     <Image source="/setup-3.png" alt="Step 3: Select Custom" width="100%" />
                 </Box>
             </BlockStack>
             <Divider />
@@ -151,7 +164,7 @@ export default function Index() {
                 <Text variant="headingMd" as="h3">Step 4: Name it 'Net Terms'</Text>
                 <Text as="p">Type exactly <strong>Net Terms</strong> into the name field and click <strong>Activate</strong>.</Text>
                 <Box padding="200" background="bg-surface-secondary" borderRadius="200" shadow="200">
-                     <Image source="/setup-4.jpg" alt="Step 4: Activate" width="100%" />
+                     <Image source="/setup-4.png" alt="Step 4: Activate" width="100%" />
                 </Box>
             </BlockStack>
         </BlockStack>
@@ -168,24 +181,26 @@ export default function Index() {
         
         {/* 1. CRITICAL SETUP ACTION */}
         {/* We show this banner if setup is NOT complete, or if you prefer, always show it for reference */}
-        <Banner 
-            title="Essential Setup Required" 
-            tone="warning" 
-            icon={SettingsIcon}
-            action={{
-                content: "View Setup Guide", 
-                onAction: () => setModalOpen(true) 
-            }}
-            secondaryAction={{
-                content: "Go to Settings",
-                url: "shopify:admin/settings/payments",
-                external: true
-            }}
-        >
-            <p>
-                To offer Net Terms at checkout, you must enable the manual payment method in your settings.
-            </p>
-        </Banner>
+        {!isSetupComplete && (
+            <Banner 
+                title="Essential Setup Required" 
+                tone="warning" 
+                icon={SettingsIcon}
+                action={{
+                    content: "View Setup Guide", 
+                    onAction: () => setModalOpen(true) 
+                }}
+                secondaryAction={{
+                    content: "Go to Settings",
+                    url: "shopify:admin/settings/payments",
+                    external: true
+                }}
+            >
+                <p>
+                    To offer Net Terms at checkout, you must enable the manual payment method in your settings.
+                </p>
+            </Banner>
+        )}
 
         <Layout>
             {/* 2. MAIN KPI SECTION */}
@@ -196,13 +211,15 @@ export default function Index() {
                         <BlockStack gap="400">
                             <InlineStack align="space-between" blockAlign="center">
                                 <Text variant="headingSm" as="h3">Accounts Receivable</Text>
-                                <ReceiptIcon width={20} tone="subdued" />
+                                <div style={{ color: 'var(--p-color-text-secondary)' }}>
+                                  <ReceiptIcon width={20} />
+                                </div>
                             </InlineStack>
                             <Box paddingBlock="200">
                                 <Text variant="heading3xl" as="h2">
                                     {pendingInvoices}
                                 </Text>
-                                <Text variant="bodySm" tone="subdued">Pending Invoices</Text>
+                                <Text variant="bodySm" as="p" tone="subdued">Pending Invoices</Text>
                             </Box>
                             <Button url="/app/invoices" fullWidth variant="primary">View Invoices</Button>
                         </BlockStack>
@@ -246,7 +263,7 @@ export default function Index() {
                                 </div>
                                 <BlockStack gap="050">
                                     <Text variant="headingSm" as="h3">Net Terms Manager</Text>
-                                    <Text variant="bodySm" tone="subdued">Approve wholesale customers for Net 30</Text>
+                                    <Text variant="bodySm" as="p" tone="subdued">Approve wholesale customers for Net 30</Text>
                                 </BlockStack>
                             </InlineStack>
                             <Button url="/app/net-terms">Manage</Button>
@@ -259,7 +276,7 @@ export default function Index() {
                                 </div>
                                 <BlockStack gap="050">
                                     <Text variant="headingSm" as="h3">Automated Reminders</Text>
-                                    <Text variant="bodySm" tone="subdued">{isPro ? "Active and monitoring" : "Upgrade to enable email automation"}</Text>
+                                    <Text variant="bodySm" as="p" tone="subdued">{isPro ? "Active and monitoring" : "Upgrade to enable email automation"}</Text>
                                 </BlockStack>
                             </InlineStack>
                             <Button url="/app/pricing" disabled={isPro} variant={isPro ? "plain" : "primary"}>

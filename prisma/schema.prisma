@@ -55,11 +55,15 @@ model Shop {
   billingStatus  BillingStatus @default(PENDING)
   customerCount  Int           @default(0)
   
-  // BRANDING FIELDS (New)
+  // BRANDING FIELDS
   brandColor     String        @default("#008060")
   logoUrl        String?
   businessName   String?
   businessAddress String?
+
+  // NEW: TERMS OF SERVICE TRACKING (Add these two lines)
+  termsAccepted  Boolean       @default(false)
+  termsAcceptedAt DateTime?
 
   // RELATIONS
   invoices       Invoice[]

@@ -3,34 +3,69 @@ import { authenticate } from "../shopify.server";
 import db from "../db.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  // We extract 'shop' from the webhook context here
   const { topic, shop, session, admin, payload } = await authenticate.webhook(request);
 
-  if (!admin) {
-    return new Response();
+  console.log(`[Webhook] Received ${topic} for ${shop}`);
+
+  // 1. Handle Mandatory GDPR Webhooks (Admin context is NOT always present here)
+  // These often come without a session, so we rely on the payload verification done by authenticate.webhook
+  
+  if (topic === "CUSTOMERS_DATA_REQUEST") {
+    // Return PII data for a specific customer. 
+    // "Net Terms Tracker" only stores Invoice data linked to customers.
+    console.log(`[GDPR] Data Request for ${payload.customer.email}`);
+    // In a real scenario, you would email the merchant a JSON dump of this customer's invoices.
+    return new Response("Data request logged", { status: 200 });
   }
 
-  if (topic === "ORDERS_CREATE") {
+  if (topic === "CUSTOMERS_REDACT") {
+    // Delete data for a specific customer
+    const customerId = payload.customer.id;
+    try {
+        await db.invoice.deleteMany({
+            where: { 
+                shop: shop,
+                customerId: `${customerId}` 
+            }
+        });
+        console.log(`[GDPR] Redacted invoices for customer ${customerId}`);
+    } catch (e) {
+        console.error("Redaction failed", e);
+    }
+    return new Response("Customer redacted", { status: 200 });
+  }
+
+  if (topic === "SHOP_REDACT") {
+    // Delete ALL data for the shop (48 hours after uninstall)
+    try {
+        await db.invoice.deleteMany({ where: { shop: shop } });
+        await db.session.deleteMany({ where: { shop: shop } });
+        await db.shop.deleteMany({ where: { shop: shop } });
+        console.log(`[GDPR] Redacted all data for shop ${shop}`);
+    } catch (e) {
+        console.error("Shop redaction failed", e);
+    }
+    return new Response("Shop redacted", { status: 200 });
+  }
+
+  // 2. Handle Order Logic (Requires Admin Context)
+  if (topic === "ORDERS_CREATE" && admin) {
     const order = payload as any;
     const gateway = order.payment_gateway_names?.[0] || "unknown";
 
     console.log(`[Webhook] Processing Order #${order.order_number} (${gateway})`);
 
-    // Check if it is a Net Terms order
     if (gateway === "manual" || gateway === "Net Terms") {
-        
-        // 1. Calculate Due Date (Net 30)
         const date = new Date();
-        date.setDate(date.getDate() + 30); // Add 30 days
+        date.setDate(date.getDate() + 30); 
 
-        // 2. Save to Database (Upsert prevents duplicates if webhook fires twice)
         try {
             await db.invoice.upsert({
-                where: { orderId: order.admin_graphql_api_id },
-                update: {}, // If it exists, do nothing
+                where: { orderId: `${order.admin_graphql_api_id}` }, // Ensure string format
+                update: {},
                 create: {
-                    shop: shop, // <--- CRITICAL FIX: Save the shop domain
-                    orderId: order.admin_graphql_api_id,
+                    shop: shop,
+                    orderId: `${order.admin_graphql_api_id}`,
                     orderNumber: `${order.order_number}`,
                     customerId: `${order.customer?.id || 'unknown'}`,
                     customerName: `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`,
