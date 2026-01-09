@@ -7,19 +7,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   console.log(`[Webhook] Received ${topic} for ${shop}`);
 
-  // 1. Handle Mandatory GDPR Webhooks (Admin context is NOT always present here)
-  // These often come without a session, so we rely on the payload verification done by authenticate.webhook
+  // =================================================================
+  // 1. GDPR & REDACTION LOGIC (KEEPING THIS INTACT)
+  // =================================================================
   
   if (topic === "CUSTOMERS_DATA_REQUEST") {
-    // Return PII data for a specific customer. 
-    // "Net Terms Tracker" only stores Invoice data linked to customers.
     console.log(`[GDPR] Data Request for ${payload.customer.email}`);
-    // In a real scenario, you would email the merchant a JSON dump of this customer's invoices.
     return new Response("Data request logged", { status: 200 });
   }
 
   if (topic === "CUSTOMERS_REDACT") {
-    // Delete data for a specific customer
     const customerId = payload.customer.id;
     try {
         await db.invoice.deleteMany({
@@ -36,7 +33,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   if (topic === "SHOP_REDACT") {
-    // Delete ALL data for the shop (48 hours after uninstall)
     try {
         await db.invoice.deleteMany({ where: { shop: shop } });
         await db.session.deleteMany({ where: { shop: shop } });
@@ -48,20 +44,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return new Response("Shop redacted", { status: 200 });
   }
 
-  // 2. Handle Order Logic (Requires Admin Context)
+  // =================================================================
+  // 2. ORDER PROCESSING LOGIC (EXISTING + NEW BALANCE UPDATE)
+  // =================================================================
   if (topic === "ORDERS_CREATE" && admin) {
     const order = payload as any;
-    const gateway = order.payment_gateway_names?.[0] || "unknown";
+    
+    // Check both the gateway name AND payment_gateway_names array for safety
+    const paymentGateways = order.payment_gateway_names || [];
+    const isNetTerms = paymentGateways.includes("Net Terms") || order.gateway === "manual";
 
-    console.log(`[Webhook] Processing Order #${order.order_number} (${gateway})`);
+    console.log(`[Webhook] Processing Order #${order.order_number}`);
 
-    if (gateway === "manual" || gateway === "Net Terms") {
+    if (isNetTerms) {
+        // --- PART A: Save Invoice to Database (Your Existing Code) ---
         const date = new Date();
         date.setDate(date.getDate() + 30); 
 
         try {
             await db.invoice.upsert({
-                where: { orderId: `${order.admin_graphql_api_id}` }, // Ensure string format
+                where: { orderId: `${order.admin_graphql_api_id}` },
                 update: {},
                 create: {
                     shop: shop,
@@ -76,9 +78,66 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                     status: "PENDING"
                 }
             });
-            console.log(`✅ Invoice saved for Order #${order.order_number}`);
+            console.log(`✅ Invoice saved to DB for Order #${order.order_number}`);
         } catch (error) {
             console.error("Failed to save invoice:", error);
+        }
+
+        // --- PART B: Update Customer Credit Balance (NEW CODE) ---
+        // We only proceed if we have a valid customer ID attached to the order
+        if (order.customer && order.customer.admin_graphql_api_id) {
+            try {
+                const customerId = order.customer.admin_graphql_api_id;
+                const orderTotalCents = Math.round(parseFloat(order.total_price) * 100);
+
+                console.log(`[Net Terms] Updating Balance for ${customerId}. Adding: ${orderTotalCents} cents`);
+
+                // 1. Fetch CURRENT Outstanding Balance
+                const customerResponse = await admin.graphql(
+                    `#graphql
+                    query getCustomer($id: ID!) {
+                        customer(id: $id) {
+                            metafield(namespace: "net_terms", key: "outstanding") {
+                                value
+                            }
+                        }
+                    }`,
+                    { variables: { id: customerId } }
+                );
+
+                const customerData = await customerResponse.json();
+                const currentOutstanding = parseInt(customerData.data?.customer?.metafield?.value || "0", 10);
+
+                // 2. Calculate NEW Balance
+                const newOutstanding = currentOutstanding + orderTotalCents;
+
+                // 3. Save it back to Shopify
+                await admin.graphql(
+                    `#graphql
+                    mutation updateOutstanding($id: ID!, $value: String!) {
+                        metafieldsSet(metafields: [{
+                            ownerId: $id,
+                            namespace: "net_terms",
+                            key: "outstanding",
+                            type: "number_integer",
+                            value: $value
+                        }]) {
+                            userErrors { field message }
+                        }
+                    }`,
+                    {
+                        variables: {
+                            id: customerId,
+                            value: newOutstanding.toString()
+                        }
+                    }
+                );
+                console.log(`[Net Terms] SUCCESS: Balance updated to ${newOutstanding}`);
+            } catch (err) {
+                console.error("Failed to update credit balance:", err);
+            }
+        } else {
+            console.log("[Net Terms] Skipping balance update (No Customer ID found on order)");
         }
     }
   }

@@ -1,0 +1,155 @@
+
+<script src="https://cdn.tailwindcss.com"></script>
+
+<div class="page-width py-8">
+  
+  <!-- HEADER SECTION (ALWAYS VISIBLE) -->
+  <div class="flex flex-col md:flex-row justify-between items-end mb-6 border-b pb-4">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-900">Finance Portal (Debug Mode)</h1>
+      {% if customer %}
+        <p class="text-slate-500">Logged in as: {{ customer.email }}</p>
+        <p class="text-xs text-slate-400 mt-1">Tags: {{ customer.tags | join: ', ' | default: 'None' }}</p>
+      {% else %}
+        <p class="text-red-500 font-bold">⚠️ No Customer Found. You must be logged in.</p>
+      {% endif %}
+    </div>
+    <div class="text-right mt-4 md:mt-0">
+      {% if customer.tags contains 'Net30_Approved' %}
+         <span class="inline-block bg-emerald-100 text-emerald-800 rounded px-3 py-1 text-xs font-bold uppercase">
+           ✅ Net Terms Active
+         </span>
+      {% else %}
+         <span class="inline-block bg-yellow-100 text-yellow-800 rounded px-3 py-1 text-xs font-bold uppercase">
+           ⚠️ Standard Account (Not Approved)
+         </span>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if customer.tags contains 'Net30_Approved' %}
+    {% assign limit = customer.metafields.net_terms.credit_limit | default: 0 %}
+    {% assign outstanding = customer.metafields.net_terms.outstanding | default: 0 %}
+    {% assign available = limit | minus: outstanding %}
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <div class="bg-white p-6 rounded-lg border border-slate-200 shadow-sm relative overflow-hidden">
+        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Available Credit</p>
+        <p class="text-3xl font-mono font-bold text-emerald-600">${{ available | money_without_currency }}</p>
+        <div class="absolute bottom-0 left-0 w-full h-1 bg-slate-100">
+           {% assign percent_used = outstanding | times: 100 | divided_by: limit %}
+           <div class="bg-emerald-500 h-full" style="width: {{ 100 | minus: percent_used }}%"></div>
+        </div>
+      </div>
+      <div class="bg-white p-6 rounded-lg border border-slate-200 shadow-sm">
+        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Outstanding Balance</p>
+        <p class="text-3xl font-mono font-bold text-slate-900">${{ outstanding | money_without_currency }}</p>
+      </div>
+      <div class="bg-slate-50 p-6 rounded-lg border border-slate-200 shadow-sm">
+         <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Total Limit</p>
+         <p class="text-2xl font-bold text-slate-600">${{ limit | money_without_currency }}</p>
+         <p class="text-xs text-slate-400 mt-2">Terms: Net 30 Days</p>
+      </div>
+    </div>
+  {% else %}
+    <div class="bg-yellow-50 border border-yellow-200 rounded p-4 mb-8">
+      <p class="text-sm text-yellow-800">Note: Metadata widgets are hidden because this account is not approved.</p>
+    </div>
+  {% endif %}
+
+  <!-- ORDERS TABLE -->
+  <div class="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+    <div class="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+      <h3 class="font-bold text-slate-800">Recent Transactions</h3>
+    </div>
+    
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-left">
+        <thead class="text-xs text-slate-500 uppercase bg-slate-50 border-b border-slate-100">
+          <tr>
+            <th class="px-6 py-3">Order</th>
+            <th class="px-6 py-3">Date</th>
+            <th class="px-6 py-3">Fin. Status</th>
+            <th class="px-6 py-3">Net Terms?</th>
+            <th class="px-6 py-3 text-right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if customer %}
+          {% paginate customer.orders by 20 %}
+            {% for order in customer.orders %}
+              
+              {% comment %} LOGIC CHECK {% endcomment %}
+              {% assign is_net_terms = false %}
+              {% assign gateway_found = "None" %}
+              
+              {% for transaction in order.transactions %}
+                  {% assign gateway_found = transaction.gateway %}
+                  {% if transaction.gateway contains 'Net Terms' or transaction.gateway == 'manual' %}
+                    {% assign is_net_terms = true %}
+                  {% endif %}
+              {% endfor %}
+
+              {% if order.financial_status == 'pending' %}
+                  {% assign is_net_terms = true %}
+              {% endif %}
+
+              <tr class="bg-white border-b hover:bg-slate-50 {% unless is_net_terms %}opacity-50 bg-gray-50{% endunless %}">
+                <td class="px-6 py-4 font-medium text-slate-900">
+                  <a href="{{ order.customer_url }}" class="hover:underline">{{ order.name }}</a>
+                </td>
+                <td class="px-6 py-4 text-slate-500">
+                  {{ order.created_at | date: "%b %d, %Y" }}
+                </td>
+                <td class="px-6 py-4">
+                  <span class="px-2 py-1 rounded text-xs font-bold border
+                    {% if order.financial_status == 'paid' %}bg-green-100 text-green-800 border-green-200
+                    {% elsif order.financial_status == 'pending' %}bg-yellow-100 text-yellow-800 border-yellow-200
+                    {% else %}bg-gray-100 text-gray-800 border-gray-200{% endif %}">
+                    {{ order.financial_status | capitalize }}
+                  </span>
+                </td>
+                <td class="px-6 py-4 text-xs font-mono">
+                  {% if is_net_terms %}
+                    <span class="text-emerald-600 font-bold">YES</span>
+                  {% else %}
+                    <span class="text-slate-400">NO</span>
+                  {% endif %}
+                  <br/><span class="text-[10px] text-gray-400">G: {{ order.transactions[0].gateway | default: 'null'}}</span>
+                </td>
+                <td class="px-6 py-4 text-right font-mono font-bold text-slate-900">
+                  {{ order.total_price | money }}
+                </td>
+              </tr>
+            {% endfor %}
+            
+            {% if customer.orders.size == 0 %}
+                <tr>
+                  <td colspan="5" class="px-6 py-8 text-center text-slate-400">
+                    No orders found on this customer object.
+                  </td>
+                </tr>
+            {% endif %}
+          {% endpaginate %}
+          {% else %}
+             <tr>
+               <td colspan="5" class="px-6 py-8 text-center text-red-500 font-bold">
+                 Customer object is null. Please ensure you are logged in.
+               </td>
+             </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+
+{% schema %}
+{
+  "name": "Finance Dashboard",
+  "target": "section",
+  "settings": []
+}
+{% endschema %}

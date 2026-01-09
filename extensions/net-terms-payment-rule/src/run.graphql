@@ -1,9 +1,23 @@
-# We name the query "RunInput" so the generated types are named "RunInput"
 query RunInput {
   cart {
+    # 1. NEW: Get the total price so we can compare it to the limit
+    cost {
+      totalAmount {
+        amount
+      }
+    }
     buyerIdentity {
       customer {
-        isApproved: hasAnyTag(tags: ["Net30_Approved"])
+        # 2. UPDATED: Check for the tag (Removed 'isApproved:' alias to match run.ts)
+        hasAnyTag(tags: ["Net30_Approved"])
+        
+        # 3. NEW: Get the Credit Limit & Balance
+        credit_limit: metafield(namespace: "net_terms", key: "credit_limit") {
+          value
+        }
+        outstanding: metafield(namespace: "net_terms", key: "outstanding") {
+          value
+        }
       }
     }
   }

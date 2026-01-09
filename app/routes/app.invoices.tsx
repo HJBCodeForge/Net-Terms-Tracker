@@ -18,7 +18,7 @@ import db from "../db.server";
 import { authenticate } from "../shopify.server";
 import { checkSubscription } from "../billing.server"; 
 
-// LOADER & ACTION (Preserved exactly as provided)
+// 1. LOADER (Preserved)
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request); 
   const plan = await checkSubscription(request); 
@@ -26,18 +26,133 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return json({ invoices, shop: session.shop, plan });
 };
 
+// 2. DIAGNOSTIC ACTION
 export const action = async ({ request }: ActionFunctionArgs) => {
-  await authenticate.admin(request);
+  const { admin } = await authenticate.admin(request);
   const formData = await request.formData();
   const invoiceId = formData.get("invoiceId") as string;
   const intent = formData.get("intent");
+
+  console.log(`[Invoice Debug] Action Triggered. Intent: ${intent}, ID: ${invoiceId}`);
+
   if (intent === "mark_paid" && invoiceId) {
+    // A. Find the Invoice
+    const invoice = await db.invoice.findUnique({ where: { id: invoiceId } });
+    
+    if (!invoice) {
+        console.error("[Invoice Debug] Invoice not found in DB.");
+        return json({ status: "error", message: "Invoice not found" });
+    }
+
+    console.log(`[Invoice Debug] Found Invoice #${invoice.orderNumber}`);
+    console.log(`[Invoice Debug] - Status: ${invoice.status}`);
+    console.log(`[Invoice Debug] - Order ID (DB): ${invoice.orderId}`);
+    console.log(`[Invoice Debug] - Customer ID (DB): ${invoice.customerId}`);
+    console.log(`[Invoice Debug] - Amount: ${invoice.amount}`);
+
+    // B. Update Local Database
+    // We do this regardless of the other steps to ensure local UI updates
     await db.invoice.update({ where: { id: invoiceId }, data: { status: "PAID" } });
+    console.log("[Invoice Debug] Local DB updated to PAID.");
+
+    // C. SYNC 1: Mark Shopify Order as Paid
+    if (invoice.orderId) {
+        console.log(`[Invoice Debug] Attempting to mark Order ${invoice.orderId} as Paid...`);
+        try {
+            const response = await admin.graphql(
+                `#graphql
+                mutation markOrderPaid($id: ID!) {
+                    orderMarkAsPaid(input: {id: $id}) {
+                        userErrors { field message }
+                    }
+                }`,
+                { variables: { id: invoice.orderId } }
+            );
+            const data = await response.json();
+            if (data.data?.orderMarkAsPaid?.userErrors?.length > 0) {
+                console.error("[Invoice Debug] Shopify Order Error:", data.data.orderMarkAsPaid.userErrors);
+            } else {
+                console.log("[Invoice Debug] Shopify Order marked as Paid successfully.");
+            }
+        } catch (e) {
+            console.error("[Invoice Debug] Failed to call Shopify Order Mutation:", e);
+        }
+    } else {
+        console.warn("[Invoice Debug] SKIPPING Order Sync: No orderId found on invoice record.");
+    }
+
+    // D. SYNC 2: Reduce Customer Debt
+    if (invoice.customerId && invoice.customerId !== 'unknown') {
+        try {
+            const rawId = invoice.customerId;
+            const customerGid = rawId.startsWith("gid://") ? rawId : `gid://shopify/Customer/${rawId}`;
+            console.log(`[Invoice Debug] Attempting to update Wallet for ${customerGid}...`);
+            
+            // 1. Fetch current balance
+            const customerResponse = await admin.graphql(
+                `#graphql
+                query getCustomer($id: ID!) {
+                    customer(id: $id) {
+                        metafield(namespace: "net_terms", key: "outstanding") {
+                            value
+                        }
+                    }
+                }`,
+                { variables: { id: customerGid } }
+            );
+            
+            const customerData = await customerResponse.json();
+            const currentOutstanding = parseInt(customerData.data?.customer?.metafield?.value || "0", 10);
+            console.log(`[Invoice Debug] Current Outstanding Balance: ${currentOutstanding}`);
+            
+            // 2. Calculate New Balance
+            const paidAmountCents = Math.round(invoice.amount * 100);
+            const newOutstanding = Math.max(0, currentOutstanding - paidAmountCents);
+            console.log(`[Invoice Debug] Paid Amount (Cents): ${paidAmountCents}`);
+            console.log(`[Invoice Debug] New Balance Calculation: ${currentOutstanding} - ${paidAmountCents} = ${newOutstanding}`);
+
+            // 3. Save new balance
+            const updateResponse = await admin.graphql(
+                `#graphql
+                mutation updateOutstanding($id: ID!, $value: String!) {
+                    metafieldsSet(metafields: [{
+                        ownerId: $id,
+                        namespace: "net_terms",
+                        key: "outstanding",
+                        type: "number_integer",
+                        value: $value
+                    }]) {
+                        userErrors { field message }
+                    }
+                }`,
+                {
+                    variables: {
+                        id: customerGid,
+                        value: newOutstanding.toString()
+                    }
+                }
+            );
+            
+            const updateJson = await updateResponse.json();
+            if (updateJson.data?.metafieldsSet?.userErrors?.length > 0) {
+                console.error("[Invoice Debug] Metafield Update Error:", updateJson.data.metafieldsSet.userErrors);
+            } else {
+                console.log(`[Invoice Debug] SUCCESS: Debt reduced to ${newOutstanding}`);
+            }
+
+        } catch (e) {
+            console.error("[Invoice Debug] Failed to update customer wallet:", e);
+        }
+    } else {
+        console.warn("[Invoice Debug] SKIPPING Wallet Sync: No customerId found on invoice record.");
+    }
+
     return json({ status: "success" });
   }
   return json({ status: "error" });
 };
 
+// 3. UI COMPONENT (Preserved Layout)
 export default function InvoiceDashboard() {
   const { invoices, shop, plan } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
@@ -46,11 +161,9 @@ export default function InvoiceDashboard() {
   const resourceName = { singular: "invoice", plural: "invoices" };
   const { selectedResources, allResourcesSelected, handleSelectionChange } = useIndexResourceState(invoices as any);
 
-  // Formatting helpers
   const formatMoney = (amount: number, currency: string) => new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount);
   const formatDate = (dateString: string) => new Date(dateString).toLocaleDateString();
 
-  // Download handlers (Logic preserved)
   const getShopifyGlobal = () => {
     // @ts-ignore
     if (typeof shopify !== 'undefined') return shopify;
@@ -60,64 +173,62 @@ export default function InvoiceDashboard() {
   };
 
   const downloadInvoice = async (id: string, orderNumber: string) => {
-     // ... (Preserved download logic)
-     try {
-      const app = getShopifyGlobal();
-      if (app && app.idToken) {
-        const token = await app.idToken();
-        const response = await fetch(`/app/invoice_pdf/${id}`, {
-          method: "GET",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!response.ok) {
-            if (response.status === 403) {
-                // @ts-ignore
-                shopify.toast.show("Upgrade to Pro to download PDFs");
-                return; 
-            }
-            throw new Error("Server rejected download");
-        }
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `Invoice-${orderNumber}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      } else {
-        window.open(`/app/invoice_pdf/${id}?shop=${shop}`, '_blank');
-      }
-    } catch (error) { console.error("Download Error:", error); }
+      try {
+       const app = getShopifyGlobal();
+       if (app && app.idToken) {
+         const token = await app.idToken();
+         const response = await fetch(`/app/invoice_pdf/${id}`, {
+           method: "GET",
+           headers: { Authorization: `Bearer ${token}` },
+         });
+         if (!response.ok) {
+             if (response.status === 403) {
+                 // @ts-ignore
+                 shopify.toast.show("Upgrade to Pro to download PDFs");
+                 return; 
+             }
+             throw new Error("Server rejected download");
+         }
+         const blob = await response.blob();
+         const url = window.URL.createObjectURL(blob);
+         const a = document.createElement("a");
+         a.href = url;
+         a.download = `Invoice-${orderNumber}.pdf`;
+         document.body.appendChild(a);
+         a.click();
+         window.URL.revokeObjectURL(url);
+         document.body.removeChild(a);
+       } else {
+         window.open(`/app/invoice_pdf/${id}?shop=${shop}`, '_blank');
+       }
+     } catch (error) { console.error("Download Error:", error); }
   };
 
   const downloadCSV = async () => {
-     // ... (Preserved CSV logic)
-     try {
-      const app = getShopifyGlobal();
-      if (app && app.idToken) {
-        const token = await app.idToken();
-        const response = await fetch(`/app/export_csv`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
-        if (!response.ok) {
-            if (response.status === 403) {
-                // @ts-ignore
-                shopify.toast.show("Upgrade to Pro to export data");
-                return;
-            }
-            throw new Error("Server rejected CSV download");
-        }
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `Invoices_Export_${new Date().toISOString().split('T')[0]}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      } else { window.open("/app/export_csv", "_blank"); }
-    } catch (error) { console.error("CSV Download Error:", error); }
+      try {
+       const app = getShopifyGlobal();
+       if (app && app.idToken) {
+         const token = await app.idToken();
+         const response = await fetch(`/app/export_csv`, { method: "GET", headers: { Authorization: `Bearer ${token}` } });
+         if (!response.ok) {
+             if (response.status === 403) {
+                 // @ts-ignore
+                 shopify.toast.show("Upgrade to Pro to export data");
+                 return;
+             }
+             throw new Error("Server rejected CSV download");
+         }
+         const blob = await response.blob();
+         const url = window.URL.createObjectURL(blob);
+         const a = document.createElement("a");
+         a.href = url;
+         a.download = `Invoices_Export_${new Date().toISOString().split('T')[0]}.csv`;
+         document.body.appendChild(a);
+         a.click();
+         window.URL.revokeObjectURL(url);
+         document.body.removeChild(a);
+       } else { window.open("/app/export_csv", "_blank"); }
+     } catch (error) { console.error("CSV Download Error:", error); }
   };
 
   const rowMarkup = invoices.map(
@@ -171,7 +282,7 @@ export default function InvoiceDashboard() {
         content: "Export CSV",
         icon: ExportIcon,
         disabled: !isPro,
-        onAction: () => isPro ? downloadCSV() : null // Logic handled by button state, but retained click check
+        onAction: () => isPro ? downloadCSV() : null 
       }}
     >
       <Layout>

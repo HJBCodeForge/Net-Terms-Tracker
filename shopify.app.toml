@@ -2,21 +2,16 @@
 
 client_id = "bc017a167faa299a9821d82028e0aa32"
 name = "net-terms-tracker"
-application_url = "https://net-terms-tracker-hjb.fly.dev"  
+application_url = "https://net-terms-tracker-hjb.fly.dev"
 embedded = true
-
-[build]
-automatically_update_urls_on_dev = true
-
-[auth]
-redirect_urls = [
-  "https://net-terms-tracker-hjb.fly.dev/auth/callback",          
-  "https://net-terms-tracker-hjb.fly.dev/auth/shopify/callback",  
-  "https://net-terms-tracker-hjb.fly.dev/api/auth/callback"       
-]
 
 [webhooks]
 api_version = "2025-01"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "/webhooks"
+  compliance_topics = [ "customers/data_request" ]
 
   [[webhooks.subscriptions]]
   topics = [ "app/uninstalled" ]
@@ -26,14 +21,16 @@ api_version = "2025-01"
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
-  [[webhooks.subscriptions]]
-  topics = [ "orders/create" ]
-  uri = "/webhooks"
-
-  [webhooks.privacy_compliance]
-  customer_data_request_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
-  customer_redaction_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
-  shop_redaction_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
-
 [access_scopes]
-scopes = "write_products,read_payment_customizations,write_payment_customizations,read_customers,write_customers,read_orders"
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_customers,read_orders,read_payment_customizations,write_customers,write_payment_customizations,write_products,write_orders,read_content,write_content"
+
+[auth]
+redirect_urls = [
+  "https://net-terms-tracker-hjb.fly.dev/auth/callback",
+  "https://net-terms-tracker-hjb.fly.dev/auth/shopify/callback",
+  "https://net-terms-tracker-hjb.fly.dev/api/auth/callback"
+]
+
+[build]
+automatically_update_urls_on_dev = true
