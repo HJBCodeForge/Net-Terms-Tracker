@@ -32,7 +32,10 @@ export const action = async ({ request }) => {
 
   if (desiredPlan === "GROWTH" || desiredPlan === "PRO") {
     const confirmUrl = await createSubscription(request, session.shop, desiredPlan);
-    if (confirmUrl) return json({ confirmUrl }); 
+    if (confirmUrl) return json({ confirmUrl });
+    
+    // If no URL returned (Dev Bypass), treat as success
+    return json({ status: "success" });
   }
   return json({ status: "error" });
 };
@@ -65,7 +68,7 @@ export default function PricingPage() {
   const { currentPlan } = loaderData;
   const handlePlanSelect = (plan) => submit({ plan }, { method: "POST" });
 
-  const PlanCard = ({ tier, title, price, features, recommended = false }) => {
+  const PlanCard = ({ tier, title, price, features, recommended = false, basePlan = null }) => {
     const isActive = currentPlan === tier;
     const isFree = tier === "FREE";
     const isDowngrade = !isActive && isFree; 
@@ -80,7 +83,7 @@ export default function PricingPage() {
                     {recommended && !isActive && <Badge tone="success">Most Popular</Badge>}
                     {isActive && <Badge tone="info">Current</Badge>}
                 </InlineStack>
-                <Text as="p" variant="heading3xl" fontWeight="bold">
+                <Text as="p" variant="heading2xl" fontWeight="bold">
                 ${price}<span style={{fontSize: "0.5em", color: "#6D7175", fontWeight: "normal"}}>/mo</span>
                 </Text>
             </BlockStack>
@@ -89,6 +92,16 @@ export default function PricingPage() {
 
             <Box minHeight="200px">
                 <BlockStack gap="300">
+                {basePlan && (
+                    <div style={{ marginBottom: "8px", paddingBottom: "8px", borderBottom: "1px dashed #E1E3E5" }}>
+                        <InlineStack gap="200" align="start" blockAlign="center">
+                            <Text as="span" tone="subdued" variant="bodySm" fontWeight="bold">
+                                Everything in {basePlan}
+                            </Text>
+                            <Badge tone="success">＋</Badge>
+                        </InlineStack>
+                    </div>
+                )}
                 {features.map((f, i) => (
                     <InlineStack key={i} gap="200" blockAlign="start">
                         <span style={{color: "#008060"}}>✓</span>
@@ -121,20 +134,22 @@ export default function PricingPage() {
                     tier="FREE" 
                     title="Starter" 
                     price="0" 
-                    features={["5 Net Terms Customers", "Manual Approval", "Email Support"]} 
+                    features={["5 Net Terms Customers", "Manual Approval", "Custom Credit Limits"]} 
                 />
                 <PlanCard 
                     tier="GROWTH" 
                     title="Growth" 
                     price="19" 
                     recommended={true}
-                    features={["Unlimited Customers", "Automated Email Reminders", "Priority Support", "Remove Branding"]} 
+                    basePlan="Starter"
+                    features={["Unlimited Customers", "Automated Email Reminders", "Email Support"]} 
                 />
                 <PlanCard 
                     tier="PRO" 
                     title="Pro" 
                     price="49" 
-                    features={["Everything in Growth", "PDF Invoice Generation", "Bulk CSV Data Exports", "Dedicated Account Manager"]} 
+                    basePlan="Growth"
+                    features={["PDF Invoice Generation", "Bulk CSV Data Exports", "Priority Support"]} 
                 />
             </InlineGrid>
         </Layout.Section>

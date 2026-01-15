@@ -41,15 +41,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         try {
             const response = await admin.graphql(
                 `#graphql
-                mutation removeTags($id: ID!, $tags: [String!]!) {
-                  tagsRemove(id: $id, tags: $tags) {
+                mutation revokeAndSuspend($id: ID!, $removeTags: [String!]!, $addTags: [String!]!) {
+                  tagsRemove(id: $id, tags: $removeTags) {
+                    userErrors { field message }
+                  }
+                  tagsAdd(id: $id, tags: $addTags) {
                     userErrors { field message }
                   }
                 }`,
                 {
                     variables: {
                         id: graphqlId,
-                        tags: ["Net30_Approved"]
+                        removeTags: ["Net30_Approved"],
+                        addTags: ["Net30_Suspended"]
                     }
                 }
             );

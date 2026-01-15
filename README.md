@@ -13,7 +13,7 @@ A full-stack Shopify Application built with **Remix** that automates B2B Net 30 
 * **Smart Credit Limits:** Calculates real-time cart totals against the customer's available credit. If the cart exceeds the limit, the Net Terms option is automatically hidden.
 * **Admin Manager:** A dedicated Polaris UI to Approve or Revoke customer access and set specific Credit Limits (e.g., $5,000).
 
-### 2. Customer Finance Portal (New!)
+### 2. Customer Finance Portal
 * **Self-Service Dashboard:** A "My Account" extension allowing customers to view their Available Credit, Outstanding Balance, and Terms.
 * **Invoice History:** A clean, professional table showing all historical invoices and their payment status (Paid, Unpaid, Overdue).
 * **Pay Now Actions:** "Unpaid" invoices generate a direct link to the checkout for immediate settlement.

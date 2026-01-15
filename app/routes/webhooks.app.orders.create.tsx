@@ -1,23 +1,36 @@
 import { type ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
+import db from "../db.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
+  console.log("[Webhook Debug] Processing logic at /webhooks/app/orders/create");
+  
   // 1. Authenticate that the signal came from Shopify
-  const { admin, payload, topic } = await authenticate.webhook(request);
+  const { admin, payload } = await authenticate.webhook(request);
 
   if (!admin) {
+    console.log("[Webhook Debug] No admin context in specific handler.");
     return new Response();
   }
 
   // 2. Parse the Order Data
   const order = payload as any;
-  console.log(`[Net Terms] Processing Order: ${order.name}`);
+  console.log(`[Net Terms] Processing Order (Specific Handler): ${order.name}`);
 
   // 3. CHECK: Is this a "Net Terms" order?
-  const isNetTerms = order.payment_gateway_names.includes("Net Terms") || order.gateway === "manual";
+  const paymentGateways = order.payment_gateway_names || [];
+  
+  // Allow 'bogus' for testing, 'manual', or explicit 'Net Terms' (case insensitive)
+  const isNetTerms = 
+      paymentGateways.some((n: string) => {
+          const lower = n.toLowerCase();
+          return lower.includes("net") && lower.includes("terms");
+      }) || 
+      order.gateway === "manual" || 
+      order.gateway === "bogus";
 
   if (!isNetTerms) {
-    console.log("[Net Terms] Ignoring order (Not Net Terms)");
+    console.log("[Net Terms] Ignoring order (Not Net Terms/Bogus)");
     return new Response();
   }
 
@@ -27,11 +40,41 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   // ==========================================================
-  // LOGIC A: INVOICE GENERATION (Placeholder)
+  // LOGIC A: INVOICE GENERATION
   // ==========================================================
-  // This confirms the order was received successfully
-  console.log(`✅ Net Terms Order Verified: ${order.name}`);
+  const date = new Date();
+  date.setDate(date.getDate() + 30); 
 
+  try {
+      const { shop } = await authenticate.webhook(request);
+      
+      // Ensure Shop exists to prevent Foreign Key errors
+      await db.shop.upsert({
+          where: { shop: shop },
+          update: {},
+          create: { shop: shop }
+      });
+
+      await db.invoice.upsert({
+          where: { orderId: `${order.admin_graphql_api_id}` },
+          update: {},
+          create: {
+              shop: shop,
+              orderId: `${order.admin_graphql_api_id}`,
+              orderNumber: `${order.order_number}`,
+              customerId: `${order.customer?.id || 'unknown'}`,
+              customerName: `${order.customer?.first_name || ''} ${order.customer?.last_name || ''}`,
+              customerEmail: order.customer?.email || 'no-email',
+              amount: parseFloat(order.total_price),
+              currency: order.currency,
+              dueDate: date,
+              status: "PENDING"
+          }
+      });
+      console.log(`✅ Invoice saved to DB via Specific Handler for Order #${order.order_number}`);
+  } catch (error) {
+      console.error("Failed to save invoice (Specific Handler):", error);
+  }
 
   // ==========================================================
   // LOGIC B: UPDATE OUTSTANDING BALANCE

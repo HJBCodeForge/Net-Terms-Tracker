@@ -52,16 +52,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     
     // Check both the gateway name AND payment_gateway_names array for safety
     const paymentGateways = order.payment_gateway_names || [];
-    const isNetTerms = paymentGateways.includes("Net Terms") || order.gateway === "manual";
+    
+    // LOGGING: See what we actually got
+    console.log(`[Webhook] Order #${order.order_number} received.`);
+    console.log(`[Webhook] - Gateway: ${order.gateway}`);
+    console.log(`[Webhook] - Payment Names: ${JSON.stringify(paymentGateways)}`);
 
-    console.log(`[Webhook] Processing Order #${order.order_number}`);
+    // Allow 'bogus' for testing, 'manual', or explicit 'Net Terms'
+    const isNetTerms = 
+        paymentGateways.some((n: string) => {
+            const lower = n.toLowerCase();
+            return lower.includes("net") && lower.includes("terms");
+        }) || 
+        order.gateway === "manual" || 
+        order.gateway === "bogus"; 
+
+    console.log(`[Webhook] Is Net Terms? ${isNetTerms}`);
 
     if (isNetTerms) {
+        console.log(`[Webhook] ✅ Identified as Net Terms Order. Processing...`);
+
         // --- PART A: Save Invoice to Database (Your Existing Code) ---
         const date = new Date();
         date.setDate(date.getDate() + 30); 
 
         try {
+            // Ensure Shop exists to prevent Foreign Key errors
+            await db.shop.upsert({
+                where: { shop: shop },
+                update: {},
+                create: { shop: shop }
+            });
+
             await db.invoice.upsert({
                 where: { orderId: `${order.admin_graphql_api_id}` },
                 update: {},

@@ -46,6 +46,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     where: { shop: session.shop, status: "PENDING" }
   });
 
+  const overdueInvoices = await db.invoice.count({
+    where: { shop: session.shop, status: "OVERDUE" }
+  });
+
   // 4. AUTO-ACTIVATE PAYMENT RULE
   const customizationsResponse = await admin.graphql(
     `#graphql
@@ -93,11 +97,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Pass this flag to the UI to optionally hide the banner if they are already set up
   const isSetupComplete = !!existingCustomization?.enabled;
 
-  return json({ plan, pendingInvoices, isSetupComplete });
+  return json({ plan, pendingInvoices, overdueInvoices, isSetupComplete });
 };
 
 export default function Index() {
-  const { plan, pendingInvoices, isSetupComplete } = useLoaderData<typeof loader>();
+  const { plan, pendingInvoices, overdueInvoices, isSetupComplete } = useLoaderData<typeof loader>();
   const [modalOpen, setModalOpen] = useState(false);
   
   const isFree = plan === "FREE";
@@ -179,6 +183,20 @@ export default function Index() {
 
       <BlockStack gap="600">
         
+        {/* OVERDUE WARNING BANNER */}
+        {overdueInvoices > 0 && (
+          <Banner
+            title="Action Required: Overdue Invoices Detected"
+            tone="critical"
+            action={{ content: "View Invoices", url: "/app/invoices" }}
+          >
+            <p>
+              There {overdueInvoices === 1 ? "is" : "are"} {overdueInvoices} overdue 
+              invoice{overdueInvoices === 1 ? "" : "s"} requiring attention.
+            </p>
+          </Banner>
+        )}
+
         {/* 1. CRITICAL SETUP ACTION */}
         {/* We show this banner if setup is NOT complete, or if you prefer, always show it for reference */}
         {!isSetupComplete && (
@@ -216,7 +234,7 @@ export default function Index() {
                                 </div>
                             </InlineStack>
                             <Box paddingBlock="200">
-                                <Text variant="heading3xl" as="h2">
+                                <Text variant="heading2xl" as="h2">
                                     {pendingInvoices}
                                 </Text>
                                 <Text variant="bodySm" as="p" tone="subdued">Pending Invoices</Text>

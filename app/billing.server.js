@@ -37,6 +37,28 @@ export async function getShop(shopDomain) {
 }
 
 export async function createSubscription(request, shopDomain, plan) {
+  // DEV BYPASS: Allow unlimited testing without "Managed Pricing" errors
+  if (process.env.NODE_ENV === "development") {
+    console.log(`[Billing] 🛠️ DEV MODE: Bypassing Billing API for plan change to ${plan}`);
+    
+    await db.shop.upsert({
+      where: { shop: shopDomain },
+      update: {
+        plan: plan,
+        billingStatus: "ACTIVE",
+        subscriptionId: `dev-mock-${Date.now()}`
+      },
+      create: {
+        shop: shopDomain,
+        plan: plan,
+        billingStatus: "ACTIVE",
+        subscriptionId: `dev-mock-${Date.now()}`
+      }
+    });
+
+    return null; // Return null to signal immediate success (no redirect needed)
+  }
+
   const { admin } = await authenticate.admin(request);
   const planDetails = PLANS[plan];
   
@@ -102,6 +124,12 @@ export async function createSubscription(request, shopDomain, plan) {
 
 export async function checkSubscription(request) {
   const { admin, session } = await authenticate.admin(request);
+  
+  // DEV BYPASS: In dev mode, the DB is the source of truth, not Shopify
+  if (process.env.NODE_ENV === "development") {
+    const dbShop = await db.shop.findUnique({ where: { shop: session.shop } });
+    return dbShop?.plan || "FREE";
+  }
   
   const response = await admin.graphql(
     `#graphql

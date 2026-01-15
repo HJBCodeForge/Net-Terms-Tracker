@@ -1,5 +1,6 @@
 import { json, type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useFetcher } from "@remix-run/react";
+import { useLoaderData, useFetcher, useRevalidator } from "@remix-run/react";
+import { useEffect } from "react";
 import {
   Page,
   Layout,
@@ -22,7 +23,10 @@ import { checkSubscription } from "../billing.server";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request); 
   const plan = await checkSubscription(request); 
-  const invoices = await db.invoice.findMany({ orderBy: { createdAt: "desc" } });
+  const invoices = await db.invoice.findMany({ 
+    where: { shop: session.shop }, 
+    orderBy: { createdAt: "desc" } 
+  });
   return json({ invoices, shop: session.shop, plan });
 };
 
@@ -147,7 +151,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         console.warn("[Invoice Debug] SKIPPING Wallet Sync: No customerId found on invoice record.");
     }
 
-    return json({ status: "success" });
+    return json({ status: "success", refreshed: new Date().toISOString() });
   }
   return json({ status: "error" });
 };
@@ -156,6 +160,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 export default function InvoiceDashboard() {
   const { invoices, shop, plan } = useLoaderData<typeof loader>();
   const fetcher = useFetcher();
+  const revalidator = useRevalidator();
+
+  // Polling for Auto-Update (every 5 seconds)
+  useEffect(() => {
+    const interval = setInterval(() => {
+        if (document.visibilityState === "visible") {
+            revalidator.revalidate();
+        }
+    }, 5000); 
+    return () => clearInterval(interval);
+  }, [revalidator]);
+
+  // OPTIMISTIC UI: Check if we are currently submitting a "mark_paid" action
+  const pendingId = fetcher.formData?.get("intent") === "mark_paid" ? fetcher.formData.get("invoiceId") : null;
 
   const isPro = plan === "PRO";
   const resourceName = { singular: "invoice", plural: "invoices" };
@@ -233,19 +251,22 @@ export default function InvoiceDashboard() {
 
   const rowMarkup = invoices.map(
     ({ id, orderNumber, customerName, amount, currency, dueDate, status, customerEmail }, index) => {
-      const isPaid = status === "PAID";
+      // OPTIMISTIC UPDATE: If this row is being marked paid, show it as PAID immediately
+      const displayStatus = (pendingId === id) ? "PAID" : status;
+      const isPaid = displayStatus === "PAID";
+      
       return (
         <IndexTable.Row id={id} key={id} selected={selectedResources.includes(id)} position={index}>
           <IndexTable.Cell><Text variant="bodyMd" fontWeight="bold" as="span">#{orderNumber}</Text></IndexTable.Cell>
           <IndexTable.Cell>
-              <BlockStack>
-                <Text variant="bodyMd" as="span" truncate>{customerName}</Text>
-                <Text variant="bodySm" tone="subdued" truncate>{customerEmail}</Text>
-              </BlockStack>
+              <div>
+                <div style={{fontWeight: 600}}>{customerName}</div>
+                <div style={{color: "#616161", fontSize: "0.8em"}}>{customerEmail}</div>
+              </div>
           </IndexTable.Cell>
           <IndexTable.Cell>{formatDate(dueDate)}</IndexTable.Cell>
           <IndexTable.Cell>{formatMoney(amount, currency)}</IndexTable.Cell>
-          <IndexTable.Cell><Badge tone={isPaid ? "success" : "attention"}>{status}</Badge></IndexTable.Cell>
+          <IndexTable.Cell><Badge tone={isPaid ? "success" : "attention"}>{displayStatus}</Badge></IndexTable.Cell>
           <IndexTable.Cell>
             <div onClick={(e) => e.stopPropagation()}>
                 {isPro ? (

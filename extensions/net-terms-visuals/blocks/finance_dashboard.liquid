@@ -1,9 +1,9 @@
 {% comment %}
   ----------------------------------------------------------------------------------
-  FINANCE PORTAL - PROFESSIONAL EDITION (Shopify Compliant)
-  - Replaces Tailwind with Scoped CSS (No external scripts)
-  - Preserves exact logic for "Net Terms" detection from previous debug version
-  - Handles "Approved" vs "Standard" views securely
+  FINANCE PORTAL - PROFESSIONAL EDITION (Smart Filtering)
+  - Added: "Show Only Unpaid" Toggle to clear clutter
+  - Logic: Uses data attributes to hide/show rows instantly without reloading
+  - Logic Preserved: Net Terms detection, Credit Calculation, and Security Checks
   ----------------------------------------------------------------------------------
 {% endcomment %}
 
@@ -25,6 +25,10 @@
         {% if customer.tags contains 'Net30_Approved' %}
            <span class="nt-status-badge nt-badge-green">
              <span class="nt-checkmark">✓</span> Net Terms Active
+           </span>
+        {% elsif customer.tags contains 'Net30_Suspended' %}
+           <span class="nt-status-badge nt-badge-red" style="background-color: #fee2e2; color: #991b1b;">
+             ⛔ Account Suspended
            </span>
         {% else %}
            <span class="nt-status-badge nt-badge-amber">
@@ -49,7 +53,8 @@
       <div class="nt-stats-grid">
         <div class="nt-card nt-card-main">
           <p class="nt-label">Available Credit</p>
-          <p class="nt-stat nt-text-success">{{ available | money_without_currency | prepend: '$' }}</p> <div class="nt-progress-track">
+          <p class="nt-stat nt-text-success">{{ available | money_without_currency | prepend: '$' }}</p>
+          <div class="nt-progress-track">
              {% if limit > 0 %}
                {% assign percent_used = outstanding | times: 100.0 | divided_by: limit %}
                <div class="nt-progress-bar" style="width: {{ 100 | minus: percent_used }}%"></div>
@@ -73,6 +78,11 @@
            </div>
         </div>
       </div>
+    {% elsif customer.tags contains 'Net30_Suspended' %}
+      <div class="nt-notice-box" style="border-left: 4px solid #ef4444; background-color: #fef2f2;">
+        <h4 style="margin: 0 0 5px 0; color: #b91c1c;">Make a Payment to Restore Access</h4>
+        <p style="margin: 0;">Your Net Terms Net 30 privileges have been suspended due to overdue invoices. Please pay all overdue invoices to reinstate your credit line.</p>
+      </div>
     {% else %}
       <div class="nt-notice-box">
         <p>Your account is not currently approved for Net Terms credit. Displaying standard order history below.</p>
@@ -81,22 +91,31 @@
 
     <div class="nt-table-container">
       <div class="nt-table-header">
-        <h3>Recent Transactions</h3>
+        <h3>Invoice History</h3>
+        
+        <div class="nt-filter-wrapper">
+          <label class="nt-toggle-switch">
+            <input type="checkbox" id="nt-hide-paid" checked onchange="togglePaidRows()">
+            <span class="nt-slider"></span>
+          </label>
+          <span class="nt-filter-label">Hide Paid Orders</span>
+        </div>
       </div>
       
       <div class="nt-overflow-scroll">
-        <table class="nt-table">
+        <table class="nt-table" id="nt-invoice-table">
           <thead>
             <tr>
               <th class="nt-col-order">Order</th>
               <th class="nt-col-date">Date</th>
               <th class="nt-col-status">Status</th>
-              <th class="nt-col-type">Type</th> <th class="nt-col-amount text-right">Amount</th>
+              <th class="nt-col-type">Type</th>
+              <th class="nt-col-amount text-right">Amount</th>
               <th class="nt-col-action text-right">Action</th>
             </tr>
           </thead>
           <tbody>
-            {% paginate customer.orders by 20 %}
+            {% paginate customer.orders by 50 %}
               {% if customer.orders.size == 0 %}
                 <tr>
                   <td colspan="6" class="nt-empty-state">
@@ -107,8 +126,13 @@
 
               {% for order in customer.orders %}
                 
+                {% comment %} SECURITY CHECK: Explicitly ensure order belongs to logged-in user {% endcomment %}
+                {% if order.customer.id != customer.id %}
+                  {% continue %}
+                {% endif %}
+
                 {% comment %} 
-                  --- LOGIC PRESERVED FROM DEBUG CODE --- 
+                  --- LOGIC PRESERVED --- 
                   Identify if this is a "Net Terms" relevant order 
                 {% endcomment %}
                 {% assign is_net_terms = false %}
@@ -121,7 +145,13 @@
                     {% assign is_net_terms = true %}
                 {% endif %}
 
-                <tr class="nt-row-hover {% unless is_net_terms %}nt-row-dimmed{% endunless %}">
+                {% comment %} Determine Filter Status {% endcomment %}
+                {% assign row_status = 'paid' %}
+                {% if order.financial_status == 'pending' or order.financial_status == 'partially_paid' %}
+                   {% assign row_status = 'unpaid' %}
+                {% endif %}
+
+                <tr class="nt-row-hover {% unless is_net_terms %}nt-row-dimmed{% endunless %}" data-status="{{ row_status }}">
                   <td class="font-medium">
                     <a href="{{ order.customer_url }}">{{ order.name }}</a>
                   </td>
@@ -179,6 +209,26 @@
   {% endif %}
 </div>
 
+<script>
+  function togglePaidRows() {
+    const isChecked = document.getElementById('nt-hide-paid').checked;
+    const rows = document.querySelectorAll('#nt-invoice-table tbody tr[data-status]');
+    
+    rows.forEach(row => {
+      // If the row is PAID, we check the toggle.
+      // If toggle is CHECKED, we HIDE paid rows.
+      if (row.getAttribute('data-status') === 'paid') {
+        row.style.display = isChecked ? 'none' : 'table-row';
+      }
+    });
+  }
+  
+  // Run on load to apply initial state
+  document.addEventListener("DOMContentLoaded", function() {
+    togglePaidRows();
+  });
+</script>
+
 {% style %}
   /* --- 1. LAYOUT & TYPOGRAPHY --- */
   .nt-portal-wrapper { max-width: 1200px; margin: 0 auto; padding: 2rem 1rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
@@ -189,7 +239,22 @@
   .nt-subtitle { color: #64748b; margin-top: 0.25rem; font-size: 0.95rem; }
   .nt-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 0.25rem; }
   
-  /* --- 2. USER STATUS --- */
+  /* --- 2. HEADER & FILTER CONTROLS --- */
+  .nt-table-header { padding: 1rem 1.5rem; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+  .nt-table-header h3 { margin: 0; font-size: 1rem; font-weight: 700; color: #1e293b; }
+  
+  .nt-filter-wrapper { display: flex; align-items: center; gap: 0.75rem; }
+  .nt-filter-label { font-size: 0.85rem; color: #475569; font-weight: 500; }
+  
+  /* Toggle Switch Styles */
+  .nt-toggle-switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+  .nt-toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .nt-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px; }
+  .nt-slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+  input:checked + .nt-slider { background-color: #0f172a; }
+  input:checked + .nt-slider:before { transform: translateX(18px); }
+
+  /* --- 3. USER STATUS --- */
   .nt-user-status { text-align: left; }
   @media(min-width: 768px) { .nt-user-status { text-align: right; } }
   .nt-logged-in { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: #475569; margin-bottom: 0.5rem; justify-content: flex-start; }
@@ -203,7 +268,7 @@
   .nt-badge-gray { background-color: #f1f5f9; color: #475569; }
   .nt-checkmark { margin-right: 4px; font-size: 1.1em; }
 
-  /* --- 3. CARDS --- */
+  /* --- 4. CARDS --- */
   .nt-stats-grid { display: grid; grid-template-columns: 1fr; gap: 1rem; margin-bottom: 2rem; }
   @media(min-width: 768px) { .nt-stats-grid { grid-template-columns: repeat(3, 1fr); } }
   
@@ -220,14 +285,12 @@
   .nt-row-label { font-size: 0.875rem; color: #64748b; font-weight: 500; }
   .nt-row-val { font-size: 1rem; color: #0f172a; font-weight: 600; font-family: monospace; }
 
-  /* --- 4. PROGRESS BAR --- */
+  /* --- 5. PROGRESS BAR --- */
   .nt-progress-track { position: absolute; bottom: 0; left: 0; width: 100%; height: 4px; background: #f1f5f9; }
   .nt-progress-bar { height: 100%; background: #10b981; }
 
-  /* --- 5. TABLE --- */
+  /* --- 6. TABLE --- */
   .nt-table-container { background: #fff; border: 1px solid #e2e8f0; border-radius: 0.5rem; overflow: hidden; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
-  .nt-table-header { padding: 1rem 1.5rem; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
-  .nt-table-header h3 { margin: 0; font-size: 1rem; font-weight: 700; color: #1e293b; }
   
   .nt-overflow-scroll { overflow-x: auto; }
   .nt-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
@@ -243,7 +306,7 @@
   .font-mono { font-family: monospace; }
   .font-medium { font-weight: 500; }
 
-  /* --- 6. BUTTONS & LINKS --- */
+  /* --- 7. BUTTONS & LINKS --- */
   .nt-btn { display: inline-block; padding: 0.35rem 0.85rem; font-size: 0.75rem; font-weight: 600; border-radius: 4px; text-decoration: none; transition: background-color 0.2s; white-space: nowrap; }
   .nt-btn-primary { background-color: #0f172a; color: #ffffff; }
   .nt-btn-primary:hover { background-color: #334155; color: #ffffff; }

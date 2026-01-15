@@ -1,5 +1,5 @@
 {% if customer.tags contains 'Net30_Approved' %}
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="{{ 'tailwindcss.js' | asset_url }}" defer></script>
   
   <div class="page-width" style="margin-top: 20px; margin-bottom: 20px;">
     {% assign limit = customer.metafields.net_terms.credit_limit | default: 0 %}

@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function main() {
-  const targetShop = "hjb-codeforge-test-01.myshopify.com"; 
+  const targetShop = "netterms-demo-v1.myshopify.com"; 
 
   console.log(`🔍 Checking database for: ${targetShop}...`);
 
