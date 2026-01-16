@@ -108,6 +108,7 @@
             <tr>
               <th class="nt-col-order">Order</th>
               <th class="nt-col-date">Date</th>
+              <th class="nt-col-due">Due Date</th>
               <th class="nt-col-status">Status</th>
               <th class="nt-col-type">Type</th>
               <th class="nt-col-amount text-right">Amount</th>
@@ -145,10 +146,32 @@
                     {% assign is_net_terms = true %}
                 {% endif %}
 
+                {% comment %} SAFETY CHECK: If not Approved/Suspended, force Standard view {% endcomment %}
+                {% unless customer.tags contains 'Net30_Approved' or customer.tags contains 'Net30_Suspended' %}
+                  {% assign is_net_terms = false %}
+                {% endunless %}
+
                 {% comment %} Determine Filter Status {% endcomment %}
                 {% assign row_status = 'paid' %}
                 {% if order.financial_status == 'pending' or order.financial_status == 'partially_paid' %}
                    {% assign row_status = 'unpaid' %}
+                {% endif %}
+
+                {% comment %} CALCULATE DUE DATE (Net 30) {% endcomment %}
+                {% assign created_seconds = order.created_at | date: "%s" | times: 1 %}
+                {% assign net_30_seconds = 2592000 %}
+                {% assign due_date_seconds = created_seconds | plus: net_30_seconds %}
+                {% assign now_seconds = "now" | date: "%s" | times: 1 %}
+                {% assign seconds_left = due_date_seconds | minus: now_seconds %}
+                {% assign days_left = seconds_left | divided_by: 86400 %}
+                
+                {% assign urgency_class = "nt-text-safe" %}
+                {% if seconds_left < 0 %}
+                    {% assign urgency_class = "nt-text-overdue" %}
+                {% elsif days_left <= 3 %}
+                    {% assign urgency_class = "nt-text-urgent" %}
+                {% elsif days_left <= 7 %}
+                     {% assign urgency_class = "nt-text-warning" %}
                 {% endif %}
 
                 <tr class="nt-row-hover {% unless is_net_terms %}nt-row-dimmed{% endunless %}" data-status="{{ row_status }}">
@@ -158,6 +181,21 @@
 
                   <td class="text-subtle">
                     {{ order.created_at | date: "%b %d, %Y" }}
+                  </td>
+
+                  <td>
+                    {% if row_status == 'unpaid' and is_net_terms %}
+                        <div class="{{ urgency_class }}">
+                           <span class="nt-text-small font-mono">{{ due_date_seconds | date: "%b %d" }}</span>
+                           {% if seconds_left < 0 %}
+                             <span class="nt-due-pill urgent">OVERDUE</span>
+                           {% else %}
+                             <span class="nt-due-pill {% if days_left <= 3 %}urgent{% endif %}">{{ days_left }}d left</span>
+                           {% endif %}
+                        </div>
+                    {% else %}
+                        <span class="text-subtle">-</span>
+                    {% endif %}
                   </td>
 
                   <td>
@@ -235,16 +273,16 @@
   .nt-header { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 2rem; border-bottom: 1px solid #e2e8f0; padding-bottom: 1.5rem; }
   @media(min-width: 768px) { .nt-header { flex-direction: row; justify-content: space-between; align-items: flex-end; } }
   
-  .nt-title { font-size: 1.5rem; font-weight: 700; color: #0f172a; margin: 0; line-height: 1.2; }
-  .nt-subtitle { color: #64748b; margin-top: 0.25rem; font-size: 0.95rem; }
-  .nt-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 0.25rem; }
+  .nt-title { font-size: 1.8rem; font-weight: 700; color: #0f172a; margin: 0; line-height: 1.2; }
+  .nt-subtitle { color: #64748b; margin-top: 0.25rem; font-size: 1.1rem; }
+  .nt-label { font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; margin-bottom: 0.25rem; }
   
   /* --- 2. HEADER & FILTER CONTROLS --- */
   .nt-table-header { padding: 1rem 1.5rem; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
-  .nt-table-header h3 { margin: 0; font-size: 1rem; font-weight: 700; color: #1e293b; }
+  .nt-table-header h3 { margin: 0; font-size: 1.2rem; font-weight: 700; color: #1e293b; }
   
   .nt-filter-wrapper { display: flex; align-items: center; gap: 0.75rem; }
-  .nt-filter-label { font-size: 0.85rem; color: #475569; font-weight: 500; }
+  .nt-filter-label { font-size: 1rem; color: #475569; font-weight: 500; }
   
   /* Toggle Switch Styles */
   .nt-toggle-switch { position: relative; display: inline-block; width: 40px; height: 22px; }
@@ -257,12 +295,12 @@
   /* --- 3. USER STATUS --- */
   .nt-user-status { text-align: left; }
   @media(min-width: 768px) { .nt-user-status { text-align: right; } }
-  .nt-logged-in { display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: #475569; margin-bottom: 0.5rem; justify-content: flex-start; }
+  .nt-logged-in { display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; color: #475569; margin-bottom: 0.5rem; justify-content: flex-start; }
   @media(min-width: 768px) { .nt-logged-in { justify-content: flex-end; } }
   
   .nt-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .nt-dot-green { background-color: #10b981; }
-  .nt-status-badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+  .nt-status-badge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 4px; font-size: 0.85rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
   .nt-badge-green { background-color: #d1fae5; color: #065f46; }
   .nt-badge-amber { background-color: #fef3c7; color: #92400e; }
   .nt-badge-gray { background-color: #f1f5f9; color: #475569; }
@@ -275,15 +313,24 @@
   .nt-card { background: #fff; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #e2e8f0; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); position: relative; overflow: hidden; }
   .nt-card-info { background: #f8fafc; display: flex; flex-direction: column; justify-content: center; }
   
-  .nt-stat { font-size: 1.75rem; font-weight: 700; color: #0f172a; margin: 0; font-family: monospace; }
+  .nt-stat { font-size: 2.25rem; font-weight: 700; color: #0f172a; margin: 0; font-family: monospace; }
   .nt-text-success { color: #059669; }
-  .nt-text-small { font-size: 0.75rem; }
+  .nt-text-small { font-size: 0.85rem; }
   .nt-text-bold { font-weight: 700; }
   .text-emerald { color: #059669; }
   
+  /* Urgency Colors */
+  .nt-text-safe { color: #059669; } /* Green */
+  .nt-text-warning { color: #d97706; } /* Amber */
+  .nt-text-urgent { color: #dc2626; font-weight: 700; } /* Red */
+  .nt-text-overdue { color: #b91c1c; font-weight: 800; } /* Dark Red */
+  
+  .nt-due-pill { display: inline-block; font-size: 0.85rem; padding: 2px 6px; border-radius: 4px; background: #f1f5f9; margin-left: 6px; border: 1px solid #e2e8f0; }
+  .nt-due-pill.urgent { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+  
   .nt-row { display: flex; justify-content: space-between; align-items: center; }
-  .nt-row-label { font-size: 0.875rem; color: #64748b; font-weight: 500; }
-  .nt-row-val { font-size: 1rem; color: #0f172a; font-weight: 600; font-family: monospace; }
+  .nt-row-label { font-size: 1rem; color: #64748b; font-weight: 500; }
+  .nt-row-val { font-size: 1.2rem; color: #0f172a; font-weight: 600; font-family: monospace; }
 
   /* --- 5. PROGRESS BAR --- */
   .nt-progress-track { position: absolute; bottom: 0; left: 0; width: 100%; height: 4px; background: #f1f5f9; }
@@ -293,8 +340,8 @@
   .nt-table-container { background: #fff; border: 1px solid #e2e8f0; border-radius: 0.5rem; overflow: hidden; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
   
   .nt-overflow-scroll { overflow-x: auto; }
-  .nt-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
-  .nt-table th { background: #f8fafc; color: #64748b; font-weight: 600; text-transform: uppercase; font-size: 0.7rem; padding: 0.75rem 1.5rem; letter-spacing: 0.05em; border-bottom: 1px solid #e2e8f0; }
+  .nt-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 1rem; }
+  .nt-table th { background: #f8fafc; color: #64748b; font-weight: 600; text-transform: uppercase; font-size: 0.85rem; padding: 0.75rem 1.5rem; letter-spacing: 0.05em; border-bottom: 1px solid #e2e8f0; }
   .nt-table td { padding: 1rem 1.5rem; color: #334155; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
   
   .nt-row-hover:hover td { background-color: #f8fafc; }
@@ -302,19 +349,19 @@
   .nt-row-dimmed:hover td { opacity: 1; } /* Restore opacity on hover */
   
   .text-right { text-align: right; }
-  .text-subtle { color: #94a3b8; font-size: 0.8rem; }
+  .text-subtle { color: #94a3b8; font-size: 0.9rem; }
   .font-mono { font-family: monospace; }
   .font-medium { font-weight: 500; }
 
   /* --- 7. BUTTONS & LINKS --- */
-  .nt-btn { display: inline-block; padding: 0.35rem 0.85rem; font-size: 0.75rem; font-weight: 600; border-radius: 4px; text-decoration: none; transition: background-color 0.2s; white-space: nowrap; }
+  .nt-btn { display: inline-block; padding: 0.35rem 0.85rem; font-size: 0.9rem; font-weight: 600; border-radius: 4px; text-decoration: none; transition: background-color 0.2s; white-space: nowrap; }
   .nt-btn-primary { background-color: #0f172a; color: #ffffff; }
   .nt-btn-primary:hover { background-color: #334155; color: #ffffff; }
   
-  .nt-link-subtle { color: #64748b; font-size: 0.75rem; font-weight: 500; text-decoration: none; }
+  .nt-link-subtle { color: #64748b; font-size: 0.9rem; font-weight: 500; text-decoration: none; }
   .nt-link-subtle:hover { color: #0f172a; text-decoration: underline; }
 
-  .nt-notice-box { padding: 1rem; background-color: #fffbeb; border: 1px solid #fcd34d; border-radius: 0.375rem; margin-bottom: 1.5rem; font-size: 0.875rem; color: #92400e; }
+  .nt-notice-box { padding: 1rem; background-color: #fffbeb; border: 1px solid #fcd34d; border-radius: 0.375rem; margin-bottom: 1.5rem; font-size: 1rem; color: #92400e; }
   .nt-alert-login { background: #fffbeb; border-left: 4px solid #f59e0b; padding: 1rem; color: #b45309; }
   .nt-pagination { text-align: center; padding: 1rem; color: #64748b; }
 {% endstyle %}

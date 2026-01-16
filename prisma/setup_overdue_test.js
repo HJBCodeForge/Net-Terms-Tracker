@@ -21,7 +21,7 @@ async function main() {
             orderId: `gid://shopify/Order/999999_${Date.now()}`, // Fake Order ID
             orderNumber: "#999-OVERDUE",
             customerId: customerId,
-            customerName: "Henning Botha",
+            customerName: "Jane Doe",
             customerEmail: "hjb.codeforge+vip@gmail.com",
             amount: 1500.00,
             currency: "USD",
