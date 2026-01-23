@@ -251,6 +251,198 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const shopifyJson = await shopifyResponse.json();
   const shopData = shopifyJson.data?.shop || {};
 
+  // B2. FETCH ONLINE STORE BRANDING (THEME OR CHECKOUT BRANDING)
+  // If the user hasn't set a custom logo in the app, try to pull it from the Online Store (Checkout Branding or Theme)
+  let remoteBrand = { logo: null as string | null, color: null as string | null };
+  const currentBrandColor = shopRecord?.brandColor;
+  const currentLogo = shopRecord?.logoUrl;
+
+  // Only fetch if fallback is needed
+  if (!currentLogo || currentBrandColor === "#008060") {
+    try {
+        // STRATEGY 1: CHECKOUT BRANDING (Preferred)
+        const profilesResp = await admin.graphql(
+            `#graphql
+            query GetCheckoutProfiles {
+                checkoutProfiles(first: 10) {
+                    nodes { id isPublished }
+                }
+            }`
+        );
+        const profilesJson = await profilesResp.json();
+        const publishedProfile = profilesJson.data?.checkoutProfiles?.nodes?.find((p: any) => p.isPublished);
+
+        if (publishedProfile) {
+            const brandingResp = await admin.graphql(
+                `#graphql
+                query GetBrandingDetails($profileId: ID!) {
+                  checkoutBranding(checkoutProfileId: $profileId) {
+                    customizations {
+                      header {
+                        logo {
+                          image { url }
+                        }
+                      }
+                    }
+                    designSystem {
+                      colors {
+                        global {
+                          brand
+                          accent
+                        }
+                      }
+                    }
+                  }
+                }`,
+                { variables: { profileId: publishedProfile.id } }
+            );
+            const brandingJson = await brandingResp.json();
+            const branding = brandingJson.data?.checkoutBranding;
+            
+            if (branding) {
+                if (branding.customizations?.header?.logo?.image?.url) {
+                    remoteBrand.logo = branding.customizations.header.logo.image.url;
+                }
+                const colors = branding.designSystem?.colors?.global;
+                if (colors?.brand) remoteBrand.color = colors.brand;
+                else if (colors?.accent) remoteBrand.color = colors.accent;
+            }
+        }
+
+        // STRATEGY 2: THEME SETTINGS (Fallback if Checkout Branding missed)
+        if (!remoteBrand.logo || !remoteBrand.color) {
+            const themeResp = await admin.graphql(
+                `#graphql
+                query GetThemeMain {
+                    themes(roles: [MAIN], first: 1) {
+                        nodes { id }
+                    }
+                }`
+            );
+            const themeJson = await themeResp.json();
+            const mainThemeId = themeJson.data?.themes?.nodes?.[0]?.id;
+
+            if (mainThemeId) {
+                const settingsResp = await admin.graphql(
+                    `#graphql
+                    query GetThemeSettings($id: ID!) {
+                      theme(id: $id) {
+                        files(filenames: ["config/settings_data.json"]) {
+                          nodes {
+                            body {
+                              ... on OnlineStoreThemeFileBodyText {
+                                content
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }`,
+                    { variables: { id: mainThemeId } }
+                );
+                const settingsJson = await settingsResp.json();
+                const content = settingsJson.data?.theme?.files?.nodes?.[0]?.body?.content;
+                if (content) {
+                    const data = JSON.parse(content);
+                    const current = data.current || {};
+                    
+                    // 1. Find Logo in Header Section (if not found in checkout)
+                    if (!remoteBrand.logo) {
+                        const sections = current.sections || {};
+                        const header = Object.values(sections).find((s:any) => s.type === 'header' || s.type?.includes('header')) as any;
+                        const logoRef = header?.settings?.logo; 
+
+                        if (logoRef && typeof logoRef === 'string') {
+                            // Resolve shopify://shop_images/foo.png
+                            const filename = logoRef.split('/').pop();
+                            const fileResp = await admin.graphql(
+                                `#graphql
+                                query GetFileUrl($query: String!) {
+                                  files(first: 1, query: $query) {
+                                    nodes {
+                                      ... on MediaImage { image { url } }
+                                      ... on GenericFile { url }
+                                    }
+                                  }
+                                }`,
+                                { variables: { query: `filename:${filename}` } }
+                            );
+                            const fileBody = await fileResp.json();
+                            const node = fileBody.data?.files?.nodes?.[0];
+                            if (node) {
+                                remoteBrand.logo = node.image?.url || node.url;
+                            }
+                        }
+                    }
+
+                    // 2. Find Brand Color (if not found in checkout)
+                    if (!remoteBrand.color) {
+                        const colorKeys = [
+                            'colors_solid_button_background', 
+                            'colors_accent_1', 
+                            'color_primary', 
+                            'colors_text_link'
+                        ];
+                        for (const k of colorKeys) {
+                            if (current[k] && typeof current[k] === 'string' && current[k].startsWith('#')) {
+                                remoteBrand.color = current[k];
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // STRATEGY 3: SHOP METAFIELDS (Brand Namespace fallback)
+        // This is where "Settings -> Brand" settings are often stored if not using Checkout Extensibility
+        if (!remoteBrand.logo || !remoteBrand.color) { 
+             const metaResp = await admin.graphql(
+                `#graphql
+                query GetShopBrandMetafields {
+                  shop {
+                    brandLogo: metafield(namespace: "brand", key: "logo") {
+                      reference {
+                        ... on MediaImage {
+                          image { url }
+                        }
+                      }
+                    }
+                    brandColors: metafield(namespace: "brand", key: "colors") {
+                      value
+                    }
+                  }
+                }`
+             );
+             const metaJson = await metaResp.json();
+             const brandLogoUrl = metaJson.data?.shop?.brandLogo?.reference?.image?.url;
+             const brandColorsVal = metaJson.data?.shop?.brandColors?.value;
+
+             if (!remoteBrand.logo && brandLogoUrl) {
+                 remoteBrand.logo = brandLogoUrl;
+             }
+             if (!remoteBrand.color && brandColorsVal) {
+                 try {
+                     const parsed = JSON.parse(brandColorsVal);
+                     // Format usually: { primary: [{background: "..."}], ... }
+                     const primary = parsed.primary?.[0]?.background;
+                     if (primary) remoteBrand.color = primary;
+                 } catch (e) {
+                     // ignore parse error
+                 }
+             }
+        }
+    } catch (e) {
+        console.warn("Could not fetch remote branding assets", e);
+    }
+  }
+
+  const finalSettings = {
+    ...shopRecord,
+    logoUrl: shopRecord?.logoUrl || remoteBrand.logo || null,
+    brandColor: (shopRecord?.brandColor !== "#008060") ? shopRecord.brandColor : (remoteBrand.color || "#008060")
+  };
+
   // C. FETCH INVOICE
   const invoice = await db.invoice.findUnique({ where: { id: invoiceId } });
   if (!invoice) throw new Response("Not Found", { status: 404 });
@@ -290,7 +482,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         invoice={invoice} 
         orderData={orderData} 
         shopData={shopData} 
-        settings={shopRecord} // Pass DB settings for branding
+        settings={finalSettings} 
     />
   );
 

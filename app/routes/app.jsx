@@ -35,6 +35,7 @@ export default function App() {
         <Link to="/app/net-terms">Net Terms Manager</Link> 
         <Link to="/app/invoices">Invoices</Link>
         <Link to="/app/pricing">Plans & Pricing</Link>
+        <Link to="/app/additional">Payment Settings</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>
