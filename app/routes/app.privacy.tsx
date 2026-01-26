@@ -44,27 +44,36 @@ export default function PrivacyPolicy() {
               </BlockStack>
 
               <BlockStack gap="300">
-                <Text variant="headingMd" as="h2">2. Data We Collect</Text>
-                <Text as="p">We collect only the Minimum Necessary Data to function:</Text>
+                <Text variant="headingMd" as="h2">2. Data We Collect & Store</Text>
+                <Text as="p">We collect and store the following data to provide invoicing services:</Text>
                 <Box paddingInlineStart="400">
                   <List type="bullet">
                     <List.Item>
-                      <strong>Merchant Data:</strong> Shop URL, Email, Plan Status.
+                      <strong>Merchant Data:</strong> Shop URL, Shop Email, Shop Name, Billing Address, and Plan Status.
                     </List.Item>
                     <List.Item>
-                      <strong>Buyer Data:</strong> Name, Email, Order IDs, Transaction Amounts.
+                      <strong>Customer Data:</strong> Name, Email Address, and Billing Address of customers who place orders using Net Terms.
+                    </List.Item>
+                    <List.Item>
+                      <strong>Order Data:</strong> Order IDs, Line Items, Transaction Amounts, and Due Dates.
                     </List.Item>
                   </List>
                 </Box>
                 <Text as="p" tone="subdued">
-                  <em>Note:</em> We DO NOT store credit card numbers or payment tokens.
+                  <em>Note:</em> We DO NOT store credit card numbers, bank account numbers, or sensitive payment tokens. All payment processing is handled strictly by Shopify.
                 </Text>
               </BlockStack>
 
               <BlockStack gap="300">
-                <Text variant="headingMd" as="h2">3. Data Retention</Text>
+                <Text variant="headingMd" as="h2">3. Data Retention & Deletion</Text>
                 <Text as="p">
-                  We retain invoice records for the duration of your installation. Upon uninstallation, data is retained for 30 days to allow for accidental re-installation, after which it is permanently deleted, unless a specific <strong>Shopify GDPR Redaction Request</strong> is received sooner.
+                  <strong>Active Retention:</strong> We retain invoice and customer records for the duration of your installation to maintain your financing history and reports.
+                </Text>
+                <Text as="p">
+                   <strong>Uninstallation:</strong> Upon uninstallation of the App, your data is marked for deletion. We retain a backup for <strong>30 days</strong> to allow for data recovery in case of accidental uninstallation. After 30 days, all personal data is permanently deleted.
+                </Text>
+                <Text as="p">
+                   <strong>GDPR/CCPA Requests:</strong> If we receive a mandatory "Shopify Redact" request (GDPR/CCPA), relevant personal data will be deleted within 48 hours, overriding the standard retention period.
                 </Text>
               </BlockStack>
             </BlockStack>

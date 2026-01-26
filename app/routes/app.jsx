@@ -1,9 +1,11 @@
 import { Link, Outlet, useLoaderData, useRouteError } from "@remix-run/react";
+import { json, redirect } from "@remix-run/node";
 import { boundary } from "@shopify/shopify-app-remix/server";
 import { AppProvider } from "@shopify/shopify-app-remix/react";
 import { NavMenu } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 import { authenticate } from "../shopify.server";
+import db from "../db.server";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
@@ -14,11 +16,29 @@ export const loader = async ({ request }) => {
   // to avoid a redirect loop (authenticate.admin throws redirect on failure).
   // The child route (app.pricing.jsx) will handle the client-side redirect.
   if (url.searchParams.get("shop") && url.searchParams.get("charge_id")) {
-    return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+    return json({ apiKey: process.env.SHOPIFY_API_KEY || "" });
   }
 
-  await authenticate.admin(request);
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  const { session } = await authenticate.admin(request);
+
+  // GLOBAL TERMS GATEKEEPER
+  // Protects all routes from unauthorized access until terms are accepted.
+  // We allow access to the terms page itself and the privacy policy.
+  const isTermsPage = url.pathname === "/app/terms";
+  const isPrivacyPage = url.pathname === "/app/privacy";
+  
+  if (!isTermsPage && !isPrivacyPage) {
+       const shopRecord = await db.shop.findUnique({
+        where: { shop: session.shop },
+      });
+
+      // If record exists but terms not accepted, redirect (or if record missing/issue, we might let them pass or handle error, here assuming record exists from auth)
+      if (shopRecord && !shopRecord.termsAccepted) {
+        throw redirect("/app/terms");
+      }
+  }
+
+  return json({ apiKey: process.env.SHOPIFY_API_KEY || "" });
 };
 
 export default function App() {

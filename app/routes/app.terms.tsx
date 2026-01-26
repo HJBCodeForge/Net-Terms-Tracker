@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { json, redirect, type LoaderFunctionArgs, type ActionFunctionArgs } from "@remix-run/node";
-import { useLoaderData, useFetcher } from "@remix-run/react";
+import { useLoaderData, useFetcher, Link } from "@remix-run/react";
 import {
   Page,
   Layout,
@@ -76,7 +76,12 @@ export default function TermsOfService() {
                 <BlockStack gap="400">
                     {/* LEGAL TEXT CONTENT */}
                     <Text variant="headingLg" as="h1">Terms of Service</Text>
-                    <Text variant="bodySm" as="p" tone="subdued">Last Updated: {new Date().toLocaleDateString()}</Text>
+                    <BlockStack gap="200">
+                        <Text variant="bodySm" as="p" tone="subdued">Last Updated: {new Date().toLocaleDateString()}</Text>
+                        <Text as="p">
+                            Please also review our <Link to="/app/privacy" target="_blank">Privacy Policy</Link> concerning data handling.
+                        </Text>
+                    </BlockStack>
                     
                     <Divider />
                     
@@ -102,7 +107,17 @@ export default function TermsOfService() {
                         The Service calculates due dates based on the logic you define (e.g., "Net 30"). You acknowledge that the Service does not automatically remit taxes or comply with local invoicing regulations (e.g., VAT, GST) on your behalf. You remain the "Merchant of Record" for all transactions.
                     </Text>
 
-                    <Text variant="headingMd" as="h2">4. Termination</Text>
+                    <Text variant="headingMd" as="h2">4. Privacy & Data Use</Text>
+                    <Text as="p">
+                        By using the Service, you agree to the collection and use of information as detailed in our <Link to="/app/privacy" target="_blank">Privacy Policy</Link>. Key points include:
+                    </Text>
+                    <ul style={{ paddingLeft: '20px', margin: '0' }}>
+                        <li>We store order and customer details necessary to generate invoices.</li>
+                        <li>Data is retained for the lifetime of the app installation plus a 30-day grace period.</li>
+                        <li>We comply with Shopify's GDPR/CCPA data redaction requests.</li>
+                    </ul>
+
+                    <Text variant="headingMd" as="h2">5. Termination</Text>
                     <Text as="p">We reserve the right to terminate access to the Service immediately if we detect:</Text>
                     <ul style={{ paddingLeft: '20px', margin: '0' }}>
                         <li>Use of the Service for money laundering or illegal financing.</li>

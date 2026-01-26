@@ -24,19 +24,7 @@ import { checkSubscription } from "../billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
-
-  // 1. GATEKEEPER: Check Terms Acceptance
-  // We check the DB. If they haven't accepted terms, we kick them out to the Terms page.
-  const shopRecord = await db.shop.findUnique({
-    where: { shop: session.shop },
-  });
-
-  if (shopRecord && !shopRecord.termsAccepted) {
-    const url = new URL(request.url);
-    url.pathname = "/app/terms";
-    url.searchParams.set("shop", session.shop);
-    throw redirect(url.toString());
-  }
+  // (Terms Acceptance is now checked globally in app.jsx layout)
 
   // 2. Sync & Fetch Shop Plan
   const plan = await checkSubscription(request);
