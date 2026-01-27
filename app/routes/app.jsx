@@ -56,6 +56,7 @@ export default function App() {
         <Link to="/app/invoices">Invoices</Link>
         <Link to="/app/pricing">Plans & Pricing</Link>
         <Link to="/app/additional">Payment Settings</Link>
+        <Link to="/app/debug">Diagnostics</Link>
       </NavMenu>
       <Outlet />
     </AppProvider>

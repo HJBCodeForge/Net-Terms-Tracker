@@ -8,8 +8,10 @@ query RunInput {
     }
     buyerIdentity {
       customer {
-        # 2. UPDATED: Check for the tag (Removed 'isApproved:' alias to match run.ts)
-        hasAnyTag(tags: ["Net30_Approved"])
+        # 2. UPDATED: Check for specific tags to determine terms
+        isNet15: hasAnyTag(tags: ["Net15_Approved"])
+        isNet30: hasAnyTag(tags: ["Net30_Approved"])
+        isNet60: hasAnyTag(tags: ["Net60_Approved"])
         
         # 3. NEW: Get the Credit Limit & Balance
         credit_limit: metafield(namespace: "net_terms", key: "credit_limit") {

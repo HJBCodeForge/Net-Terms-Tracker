@@ -1,4 +1,18 @@
-{% if customer.tags contains 'Net30_Approved' %}
+{% assign show_widget = false %}
+{% assign term_name = "" %}
+
+{% if customer.tags contains 'Net15_Approved' %}
+  {% assign show_widget = true %}
+  {% assign term_name = "Net 15" %}
+{% elsif customer.tags contains 'Net30_Approved' %}
+  {% assign show_widget = true %}
+  {% assign term_name = "Net 30" %}
+{% elsif customer.tags contains 'Net60_Approved' %}
+  {% assign show_widget = true %}
+  {% assign term_name = "Net 60" %}
+{% endif %}
+
+{% if show_widget %}
   <script src="{{ 'tailwindcss.js' | asset_url }}" defer></script>
   
   <div class="page-width" style="margin-top: 20px; margin-bottom: 20px;">
@@ -14,7 +28,7 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
           <div>
-            <h3 class="font-bold text-slate-800 text-sm">Net 30 Account Active</h3>
+            <h3 class="font-bold text-slate-800 text-sm">{{ term_name }} Account Active</h3>
             <p class="text-xs text-slate-500">Authorized for {{ shop.name }}</p>
           </div>
         </div>

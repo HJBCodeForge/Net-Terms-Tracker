@@ -23,13 +23,12 @@ export function run(input: RunInput): CartPaymentMethodsTransformRunResult {
     // 2. Check Customer Status
     const customer = input.cart.buyerIdentity?.customer;
     
-    // SAFETY CHECK: If the new GraphQL didn't deploy, handle the old 'isApproved' alias too
-    // @ts-ignore - Ignore TS error if properties strictly differ between deployments
-    const hasTag = customer?.hasAnyTag;
-    // @ts-ignore
-    const aliasApproved = customer?.isApproved; 
+    // Determine active term
+    const isNet15 = customer?.isNet15 ?? false;
+    const isNet30 = customer?.isNet30 ?? false;
+    const isNet60 = customer?.isNet60 ?? false;
     
-    const isApproved = (hasTag ?? aliasApproved) ?? false;
+    const isApproved = isNet15 || isNet30 || isNet60;
 
     // RULE 1: If NOT approved, HIDE it
     if (!isApproved) {
@@ -41,6 +40,13 @@ export function run(input: RunInput): CartPaymentMethodsTransformRunResult {
         }]
       };
     }
+
+    // Determine Label
+    let termLabel = "Net 30 Terms"; // Default
+    if (isNet15) termLabel = "Net 15 Terms";
+    else if (isNet60) termLabel = "Net 60 Terms";
+    
+    console.log(`[Net Terms] Renaming method ${netTermsMethod.id} to '${termLabel}'`);
 
     // 3. THE ENFORCER (Math Logic)
     const limitCents = customer?.credit_limit?.value ? parseInt(customer.credit_limit.value) : 0;
@@ -66,7 +72,14 @@ export function run(input: RunInput): CartPaymentMethodsTransformRunResult {
     }
 
     console.log("[Net Terms] ALLOWING: Sufficient funds.");
-    return { operations: [] };
+    return { 
+      operations: [{
+        paymentMethodRename: {
+          paymentMethodId: netTermsMethod.id,
+          name: termLabel
+        }
+      }] 
+    };
 
   } catch (error) {
     // 4. SAFETY NET: If code crashes, Log it and Allow payment (Fail Open)

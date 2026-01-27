@@ -16,6 +16,7 @@ import {
   Box,
   TextField,
   InlineStack,
+  Select,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
@@ -47,14 +48,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const data = await response.json();
 
-  const customers = data.data.customers.nodes.map((node: any) => ({
-    id: node.id,
-    name: `${node.firstName || ""} ${node.lastName || ""}`.trim() || "No Name",
-    email: node.email,
-    isApproved: node.tags.includes("Net30_Approved"),
-    creditLimit: node.credit_limit?.value ? parseFloat(node.credit_limit.value) / 100 : 0,
-    outstanding: node.outstanding?.value ? parseFloat(node.outstanding.value) / 100 : 0,
-  }));
+  const customers = data.data.customers.nodes.map((node: any) => {
+    const tags = node.tags || [];
+    let term = "";
+    if (tags.includes("Net15_Approved")) term = "Net 15"; 
+    else if (tags.includes("Net30_Approved")) term = "Net 30";
+    else if (tags.includes("Net60_Approved")) term = "Net 60";
+
+    return {
+      id: node.id,
+      name: `${node.firstName || ""} ${node.lastName || ""}`.trim() || "No Name",
+      email: node.email,
+      isApproved: term !== "",
+      term: term,
+      creditLimit: node.credit_limit?.value ? parseFloat(node.credit_limit.value) / 100 : 0,
+      outstanding: node.outstanding?.value ? parseFloat(node.outstanding.value) / 100 : 0,
+    };
+  });
 
   const approvedCount = customers.filter((c: any) => c.isApproved).length;
   const shopRecord = await db.shop.findUnique({
@@ -109,7 +119,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const countResponse = await admin.graphql(
         `#graphql
         query countApproved {
-          customers(first: 10, query: "tag:Net30_Approved") {
+          customers(first: 10, query: "tag:Net*_Approved") {
             edges { node { id } }
           }
         }`
@@ -123,21 +133,39 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   }
 
-  const mutation = intent === "approve"
-    ? `mutation addTags($id: ID!, $tags: [String!]!) {
-        tagsAdd(id: $id, tags: $tags) {
-          userErrors { field message }
-        }
-      }`
-    : `mutation removeTags($id: ID!, $tags: [String!]!) {
-        tagsRemove(id: $id, tags: $tags) {
-          userErrors { field message }
-        }
-      }`;
-
-  await admin.graphql(mutation, {
-    variables: { id: customerId, tags: ["Net30_Approved"] },
+  // Remove ALL Net Terms tags first to avoid duplicates/conflicts
+  const cleanupMutation = `#graphql
+    mutation removeTags($id: ID!, $tags: [String!]!) {
+      tagsRemove(id: $id, tags: $tags) {
+        userErrors { field message }
+      }
+    }`;
+  
+  await admin.graphql(cleanupMutation, {
+    variables: { 
+      id: customerId, 
+      tags: ["Net15_Approved", "Net30_Approved", "Net60_Approved"] 
+    },
   });
+
+  // If approving, add the specific tag
+  if (intent === "approve") {
+      const term = formData.get("term") as string;
+      // Default to Net 30 if something weird happens, but UI should prevent it
+      const tagToAdd = term === "Net 15" ? "Net15_Approved" : 
+                       term === "Net 60" ? "Net60_Approved" : "Net30_Approved";
+
+      const addMutation = `#graphql
+        mutation addTags($id: ID!, $tags: [String!]!) {
+          tagsAdd(id: $id, tags: $tags) {
+            userErrors { field message }
+          }
+        }`;
+
+      await admin.graphql(addMutation, {
+        variables: { id: customerId, tags: [tagToAdd] },
+      });
+  }
 
   return json({ status: "success" });
 };
@@ -199,7 +227,7 @@ function CustomerTable({ customers, isAtLimit }: { customers: any[], isAtLimit: 
     useIndexResourceState(customers);
 
   const rowMarkup = customers.map(
-    ({ id, name, email, isApproved, creditLimit, outstanding }, index) => {
+    ({ id, name, email, isApproved, term, creditLimit, outstanding }, index) => {
       const available = creditLimit - outstanding;
       
       return (
@@ -217,12 +245,12 @@ function CustomerTable({ customers, isAtLimit }: { customers: any[], isAtLimit: 
 
           {/* Status Badge */}
           <IndexTable.Cell>
-            {isApproved ? <Badge tone="success">Active</Badge> : <Badge>Inactive</Badge>}
+            {isApproved ? <Badge tone="success">{term}</Badge> : <Badge>Inactive</Badge>}
           </IndexTable.Cell>
 
           {/* Action Button */}
           <IndexTable.Cell>
-            <ApprovalButton id={id} isApproved={isApproved} isAtLimit={isAtLimit} />
+            <ApprovalButton id={id} isApproved={isApproved} term={term} isAtLimit={isAtLimit} />
           </IndexTable.Cell>
 
           {/* Limit Input - Wider Box for Button */}
@@ -272,22 +300,60 @@ function CustomerTable({ customers, isAtLimit }: { customers: any[], isAtLimit: 
   );
 }
 
-function ApprovalButton({ id, isApproved, isAtLimit }: { id: string, isApproved: boolean, isAtLimit: boolean }) {
+function ApprovalButton({ id, isApproved, term, isAtLimit }: { id: string, isApproved: boolean, term: string, isAtLimit: boolean }) {
   const fetcher = useFetcher();
+  const [selectedTerm, setSelectedTerm] = useState("Net 30");
+
+  const options = [
+    { label: "Net 15", value: "Net 15" },
+    { label: "Net 30", value: "Net 30" },
+    { label: "Net 60", value: "Net 60" },
+  ];
+
+  if (isApproved) {
+      return (
+        <div onClick={(e) => e.stopPropagation()}>
+          <fetcher.Form method="post">
+            <input type="hidden" name="customerId" value={id} />
+            <input type="hidden" name="intent" value="revoke" />
+            <Button 
+              submit 
+              size="micro" 
+              tone="critical"
+            >
+              Revoke
+            </Button>
+          </fetcher.Form>
+        </div>
+      );
+  }
+
   return (
     <div onClick={(e) => e.stopPropagation()}>
       <fetcher.Form method="post">
         <input type="hidden" name="customerId" value={id} />
-        <input type="hidden" name="intent" value={isApproved ? "revoke" : "approve"} />
-        <Button 
-          submit 
-          size="micro" 
-          variant={isApproved ? "primary" : "secondary"} 
-          tone={isApproved ? "critical" : undefined}
-          disabled={!isApproved && isAtLimit}
-        >
-          {isApproved ? "Revoke" : "Approve"}
-        </Button>
+        <input type="hidden" name="intent" value="approve" />
+        <input type="hidden" name="term" value={selectedTerm} />
+        <InlineStack gap="200" wrap={false} blockAlign="center">
+            <div style={{ width: "90px" }}>
+                <Select
+                    label="Term"
+                    labelHidden
+                    options={options}
+                    onChange={setSelectedTerm}
+                    value={selectedTerm}
+                    disabled={isAtLimit}
+                />
+            </div>
+            <Button 
+              submit 
+              size="micro" 
+              variant="primary" 
+              disabled={isAtLimit}
+            >
+              Approve
+            </Button>
+        </InlineStack>
       </fetcher.Form>
     </div>
   );

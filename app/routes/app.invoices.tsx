@@ -85,18 +85,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         console.warn("[Invoice Debug] SKIPPING Order Sync: No orderId found on invoice record.");
     }
 
-    // D. SYNC 2: Reduce Customer Debt
+    // D. SYNC 2: Reduce Customer Debt & Handle Suspension Logic
     if (invoice.customerId && invoice.customerId !== 'unknown') {
         try {
             const rawId = invoice.customerId;
             const customerGid = rawId.startsWith("gid://") ? rawId : `gid://shopify/Customer/${rawId}`;
-            console.log(`[Invoice Debug] Attempting to update Wallet for ${customerGid}...`);
+            console.log(`[Invoice Debug] Attempting to update Wallet & Tags for ${customerGid}...`);
             
-            // 1. Fetch current balance
+            // 1. Fetch current balance AND tags
             const customerResponse = await admin.graphql(
                 `#graphql
                 query getCustomer($id: ID!) {
                     customer(id: $id) {
+                        tags
                         metafield(namespace: "net_terms", key: "outstanding") {
                             value
                         }
@@ -107,7 +108,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             
             const customerData = await customerResponse.json();
             const currentOutstanding = parseInt(customerData.data?.customer?.metafield?.value || "0", 10);
+            const currentTags: string[] = customerData.data?.customer?.tags || [];
+            
             console.log(`[Invoice Debug] Current Outstanding Balance: ${currentOutstanding}`);
+            console.log(`[Invoice Debug] Current Tags: ${currentTags.join(', ')}`);
             
             // 2. Calculate New Balance
             const paidAmountCents = Math.round(invoice.amount * 100);
@@ -115,9 +119,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
             console.log(`[Invoice Debug] Paid Amount (Cents): ${paidAmountCents}`);
             console.log(`[Invoice Debug] New Balance Calculation: ${currentOutstanding} - ${paidAmountCents} = ${newOutstanding}`);
 
-            // 3. Save new balance
-            const updateResponse = await admin.graphql(
-                `#graphql
+            // 3. Prepare Metadata Update
+            const mutationProms = [];
+            
+            // Mutation A: Update Balance
+            const metaUpdateStr = `#graphql
                 mutation updateOutstanding($id: ID!, $value: String!) {
                     metafieldsSet(metafields: [{
                         ownerId: $id,
@@ -128,24 +134,71 @@ export const action = async ({ request }: ActionFunctionArgs) => {
                     }]) {
                         userErrors { field message }
                     }
-                }`,
-                {
-                    variables: {
-                        id: customerGid,
-                        value: newOutstanding.toString()
-                    }
-                }
-            );
+                }`;
             
-            const updateJson = await updateResponse.json();
-            if (updateJson.data?.metafieldsSet?.userErrors?.length > 0) {
-                console.error("[Invoice Debug] Metafield Update Error:", updateJson.data.metafieldsSet.userErrors);
-            } else {
-                console.log(`[Invoice Debug] SUCCESS: Debt reduced to ${newOutstanding}`);
+            mutationProms.push(
+                admin.graphql(metaUpdateStr, {
+                    variables: { id: customerGid, value: newOutstanding.toString() }
+                }).then(r => r.json())
+            );
+
+            // 4. CHECK FOR SUSPENSION RESET
+            // If the user is currently suspended, check if they have any OTHER overdue invoices.
+            // Since we just marked *this* invoice as PAID in step B, we just need to see if any remaining invoices are OVERDUE.
+            
+            const suspendedTags = currentTags.filter(t => t.endsWith('_Suspended'));
+            if (suspendedTags.length > 0) {
+                console.log(`[Invoice Debug] Customer is currently suspended (${suspendedTags.join(',')}). Checking for reinstatement...`);
+                
+                // Query DB for any remaining overdue items (check both ID formats to be safe)
+                const rawIdLookup = invoice.customerId.replace("gid://shopify/Customer/", "");
+                const gidLookup = `gid://shopify/Customer/${rawIdLookup}`;
+
+                const remainingOverdueCount = await db.invoice.count({
+                    where: {
+                        customerId: { in: [rawIdLookup, gidLookup] },
+                        shop: invoice.shop,
+                        status: "OVERDUE"
+                    }
+                });
+
+                if (remainingOverdueCount === 0) {
+                    console.log("[Invoice Debug] No remaining overdue invoices. PROCEEDING WITH REINSTATEMENT.");
+                    
+                    const tagsToRemove = [...suspendedTags];
+                    const tagsToAdd: string[] = [];
+
+                    // Logic: Swap "NetXX_Suspended" -> "NetXX_Approved"
+                    if (suspendedTags.includes("Net15_Suspended")) tagsToAdd.push("Net15_Approved");
+                    if (suspendedTags.includes("Net30_Suspended")) tagsToAdd.push("Net30_Approved");
+                    if (suspendedTags.includes("Net60_Suspended")) tagsToAdd.push("Net60_Approved");
+
+                    const tagMutationStr = `#graphql
+                        mutation reinstateTags($id: ID!, $remove: [String!]!, $add: [String!]!) {
+                            tagsRemove(id: $id, tags: $remove) {
+                                userErrors { field message }
+                            }
+                            tagsAdd(id: $id, tags: $add) {
+                                userErrors { field message }
+                            }
+                        }`;
+
+                    mutationProms.push(
+                        admin.graphql(tagMutationStr, {
+                            variables: { id: customerGid, remove: tagsToRemove, add: tagsToAdd }
+                        }).then(r => r.json())
+                    );
+                } else {
+                    console.log(`[Invoice Debug] Customer still has ${remainingOverdueCount} overdue invoices. Suspension remains.`);
+                }
             }
 
+            // Execute all mutations
+            const results = await Promise.all(mutationProms);
+            console.log("[Invoice Debug] Sync Operations Complete.", results);
+
         } catch (e) {
-            console.error("[Invoice Debug] Failed to update customer wallet:", e);
+            console.error("[Invoice Debug] Failed to update customer wallet/tags:", e);
         }
     } else {
         console.warn("[Invoice Debug] SKIPPING Wallet Sync: No customerId found on invoice record.");

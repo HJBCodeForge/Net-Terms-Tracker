@@ -22,11 +22,25 @@
           <span>{{ customer.email }}</span>
         </div>
         
-        {% if customer.tags contains 'Net30_Approved' %}
+        {% assign active_term = "" %}
+        {% if customer.tags contains 'Net15_Approved' %}
+           {% assign active_term = "Net 15" %}
+        {% elsif customer.tags contains 'Net30_Approved' %}
+           {% assign active_term = "Net 30" %}
+        {% elsif customer.tags contains 'Net60_Approved' %}
+           {% assign active_term = "Net 60" %}
+        {% endif %}
+
+        {% assign is_suspended = false %}
+        {% if customer.tags contains 'Net15_Suspended' or customer.tags contains 'Net30_Suspended' or customer.tags contains 'Net60_Suspended' %}
+           {% assign is_suspended = true %}
+        {% endif %}
+
+        {% if active_term != "" and is_suspended == false %}
            <span class="nt-status-badge nt-badge-green">
-             <span class="nt-checkmark">✓</span> Net Terms Active
+             <span class="nt-checkmark">✓</span> {{ active_term }} Terms
            </span>
-        {% elsif customer.tags contains 'Net30_Suspended' %}
+        {% elsif is_suspended %}
            <span class="nt-status-badge nt-badge-red" style="background-color: #fee2e2; color: #991b1b;">
              ⛔ Account Suspended
            </span>
@@ -45,7 +59,7 @@
 
   {% if customer %}
   
-    {% if customer.tags contains 'Net30_Approved' %}
+    {% if active_term != "" and is_suspended == false %}
       {% assign limit = customer.metafields.net_terms.credit_limit | default: 0 %}
       {% assign outstanding = customer.metafields.net_terms.outstanding | default: 0 %}
       {% assign available = limit | minus: outstanding %}
@@ -74,14 +88,14 @@
            </div>
            <div class="nt-row mt-2">
              <span class="nt-row-label">Terms</span>
-             <span class="nt-row-val">Net 30 Days</span>
+             <span class="nt-row-val">{{ active_term }} Days</span>
            </div>
         </div>
       </div>
-    {% elsif customer.tags contains 'Net30_Suspended' %}
+    {% elsif is_suspended %}
       <div class="nt-notice-box" style="border-left: 4px solid #ef4444; background-color: #fef2f2;">
         <h4 style="margin: 0 0 5px 0; color: #b91c1c;">Make a Payment to Restore Access</h4>
-        <p style="margin: 0;">Your Net Terms Net 30 privileges have been suspended due to overdue invoices. Please pay all overdue invoices to reinstate your credit line.</p>
+        <p style="margin: 0;">Your Net Terms privileges have been suspended due to overdue invoices. Please pay all overdue invoices to reinstate your credit line.</p>
       </div>
     {% else %}
       <div class="nt-notice-box">
@@ -157,11 +171,18 @@
                    {% assign row_status = 'unpaid' %}
                 {% endif %}
 
-                {% comment %} CALCULATE DUE DATE (Net 30) {% endcomment %}
-                {% assign created_seconds = order.created_at | date: "%s" | times: 1 %}
-                {% assign net_30_seconds = 2592000 %}
-                {% assign due_date_seconds = created_seconds | plus: net_30_seconds %}
+                {% comment %} CALCULATE DUE DATE (Dynamic) {% endcomment %}
                 {% assign now_seconds = "now" | date: "%s" | times: 1 %}
+                
+                {% if order.metafields.net_terms.due_date %}
+                    {% assign due_date_seconds = order.metafields.net_terms.due_date | date: "%s" | times: 1 %}
+                {% else %}
+                    {% comment %} Fallback for Legacy Orders (Default Net 30) {% endcomment %}
+                    {% assign created_seconds = order.created_at | date: "%s" | times: 1 %}
+                    {% assign net_30_seconds = 2592000 %}
+                    {% assign due_date_seconds = created_seconds | plus: net_30_seconds %}
+                {% endif %}
+
                 {% assign seconds_left = due_date_seconds | minus: now_seconds %}
                 {% assign days_left = seconds_left | divided_by: 86400 %}
                 

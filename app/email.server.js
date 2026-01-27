@@ -22,7 +22,7 @@ export async function sendInvoiceReminder({ to, customerName, invoiceNumber, amo
             <p style="margin: 0; font-size: 18px;"><strong>Amount Due: ${amount}</strong></p>
           </div>
 
-          <p>Please ensure payment is made by the due date to maintain your Net 30 status.</p>
+          <p>Please ensure payment is made by the due date to maintain your Net Terms status.</p>
           
           <a href="${checkoutUrl}" style="background: #000; color: #fff; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Invoice</a>
         </div>

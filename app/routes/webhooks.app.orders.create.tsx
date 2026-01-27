@@ -40,11 +40,51 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   // ==========================================================
+  // LOGIC B: UPDATE OUTSTANDING BALANCE
+  // ==========================================================
+  const customerId = order.customer.admin_graphql_api_id; 
+  
+  // 1. Get the Order Total in Cents
+  const orderTotalCents = Math.round(parseFloat(order.total_price) * 100);
+  console.log(`[Net Terms] Updating Balance. Adding: ${orderTotalCents} cents`);
+
+  // 2. Fetch CURRENT Customer Data (Outstanding Balance & Tags)
+  const customerResponse = await admin.graphql(
+    `#graphql
+    query getCustomer($id: ID!) {
+      customer(id: $id) {
+        tags
+        metafield(namespace: "net_terms", key: "outstanding") {
+          value
+        }
+      }
+    }`,
+    { variables: { id: customerId } }
+  );
+
+  const customerData = await customerResponse.json();
+  const currentOutstandingCents = customerData.data.customer?.metafield?.value 
+      ? parseInt(customerData.data.customer.metafield.value) 
+      : 0;
+
+  const tags = customerData.data.customer?.tags || [];
+  
+  // DETERMINE TERM
+  let days = 30; // Default
+  if (tags.includes("Net15_Approved")) days = 15;
+  else if (tags.includes("Net60_Approved")) days = 60;
+  
+  // CALCULATE DUE DATE
+  const dueDate = new Date();
+  dueDate.setDate(dueDate.getDate() + days);
+  
+  // FORMAT FOR METAFIELD (YYYY-MM-DD or ISO)
+  // Liquid 'date' filter handles ISO strings well.
+  const dueDateISO = dueDate.toISOString(); 
+
+  // ==========================================================
   // LOGIC A: INVOICE GENERATION
   // ==========================================================
-  const date = new Date();
-  date.setDate(date.getDate() + 30); 
-
   try {
       const { shop } = await authenticate.webhook(request);
       
@@ -57,7 +97,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
       await db.invoice.upsert({
           where: { orderId: `${order.admin_graphql_api_id}` },
-          update: {},
+          update: { dueDate: dueDate },
           create: {
               shop: shop,
               orderId: `${order.admin_graphql_api_id}`,
@@ -67,42 +107,46 @@ export const action = async ({ request }: ActionFunctionArgs) => {
               customerEmail: order.customer?.email || 'no-email',
               amount: parseFloat(order.total_price),
               currency: order.currency,
-              dueDate: date,
+              dueDate: dueDate,
               status: "PENDING"
           }
       });
-      console.log(`✅ Invoice saved to DB via Specific Handler for Order #${order.order_number}`);
+      console.log(`✅ Invoice saved to DB with Net ${days} Terms.`);
   } catch (error) {
       console.error("Failed to save invoice (Specific Handler):", error);
   }
 
   // ==========================================================
-  // LOGIC B: UPDATE OUTSTANDING BALANCE
+  // LOGIC C: SAVE DUE DATE TO ORDER METAFIELD (For Liquid Access)
   // ==========================================================
-  const customerId = order.customer.admin_graphql_api_id; 
-  
-  // 1. Get the Order Total in Cents
-  const orderTotalCents = Math.round(parseFloat(order.total_price) * 100);
-  console.log(`[Net Terms] Updating Balance. Adding: ${orderTotalCents} cents`);
-
-  // 2. Fetch CURRENT Outstanding Balance
-  const customerResponse = await admin.graphql(
+  const orderId = order.admin_graphql_api_id;
+  await admin.graphql(
     `#graphql
-    query getCustomer($id: ID!) {
-      customer(id: $id) {
-        metafield(namespace: "net_terms", key: "outstanding") {
-          value
-        }
+    mutation setOrderMetafield($metafields: [MetafieldsSetInput!]!) {
+      metafieldsSet(metafields: $metafields) {
+        userErrors { field message }
       }
     }`,
-    { variables: { id: customerId } }
+    {
+      variables: {
+        metafields: [{
+          ownerId: orderId,
+          namespace: "net_terms",
+          key: "due_date",
+          type: "date_time",
+          value: dueDateISO
+        }]
+      }
+    }
   );
+  console.log(`✅ Due Date (${dueDateISO}) saved to Order Metafield.`);
 
-  const customerData = await customerResponse.json();
-  const currentOutstanding = parseInt(customerData.data?.customer?.metafield?.value || "0", 10);
+  // ==========================================================
+  // LOGIC B: UPDATE OUTSTANDING BALANCE (Continued)
+  // ==========================================================
 
-  // 3. Calculate NEW Balance
-  const newOutstanding = currentOutstanding + orderTotalCents;
+  // 3. Calculate NEW Balance (using variables from Step 2)
+  const newOutstanding = currentOutstandingCents + orderTotalCents;
 
   // 4. Save it back to Shopify
   await admin.graphql(

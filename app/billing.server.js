@@ -22,6 +22,13 @@ export const PLANS = {
   },
 };
 
+const VIP_SHOPS = [
+  "netterms-demo-v1.myshopify.com",
+  "hjb-test-store.myshopify.com"
+];
+
+export { VIP_SHOPS }; // Export for use in pricing page
+
 export async function getShop(shopDomain) {
   const shop = await db.shop.findUnique({ where: { shop: shopDomain } });
   
@@ -72,16 +79,24 @@ export async function createSubscription(request, shopDomain, plan) {
 
   // 2. Construct Return URL with Explicit Shop Parameter
   const returnUrl = `${appUrl}/app/pricing?shop=${shopDomain}`;
+  
+  // 3. Determine Trial Days (VIP Override)
+  let trialDays = 7; // Standard 7-day trial
+  if (VIP_SHOPS.includes(shopDomain)) {
+    console.log(`[Billing] 🌟 VIP SHOP DETECTED: Granting 365-day trial to ${shopDomain}`);
+    trialDays = 365;
+  }
 
   console.log("---------------------------------------------------");
   console.log(`[Billing] 💰 Initiating Charge for ${shopDomain}`);
   console.log(`[Billing] 🔗 Return URL set to: ${returnUrl}`);
+  console.log(`[Billing] ⏳ Trial Days: ${trialDays}`);
   console.log("---------------------------------------------------");
 
   const response = await admin.graphql(
     `#graphql
-    mutation AppSubscriptionCreate($name: String!, $lineItems: [AppSubscriptionLineItemInput!]!, $returnUrl: URL!, $test: Boolean) {
-      appSubscriptionCreate(name: $name, returnUrl: $returnUrl, lineItems: $lineItems, test: $test) {
+    mutation AppSubscriptionCreate($name: String!, $lineItems: [AppSubscriptionLineItemInput!]!, $returnUrl: URL!, $test: Boolean, $trialDays: Int) {
+      appSubscriptionCreate(name: $name, returnUrl: $returnUrl, lineItems: $lineItems, test: $test, trialDays: $trialDays) {
         userErrors {
           field
           message
@@ -96,7 +111,8 @@ export async function createSubscription(request, shopDomain, plan) {
       variables: {
         name: planDetails.name,
         returnUrl: returnUrl,
-        test: true, 
+        test: true,
+        trialDays: trialDays,
         lineItems: [
           {
             plan: {
@@ -167,6 +183,89 @@ export async function checkSubscription(request) {
   });
 
   return currentPlan;
+}
+
+export async function getPlanDetails(request) {
+  const { admin, session } = await authenticate.admin(request);
+  const isVip = VIP_SHOPS.includes(session.shop);
+
+  // DEV BYPASS
+  if (process.env.NODE_ENV === "development") {
+    const dbShop = await db.shop.findUnique({ where: { shop: session.shop } });
+    const fakePlan = dbShop?.plan || "FREE";
+    
+    // FAKE TRIAL LOGIC FOR DEV
+    let fakeTrialEnd = null;
+    let fakeDaysRemaining = 0;
+    
+    if (fakePlan !== "FREE") {
+        // Simulate a trial that expires in 5 days
+        const now = Date.now();
+        const days = isVip ? 365 : 7;
+        const fakeEndTime = now + (days * 24 * 60 * 60 * 1000) - (2 * 24 * 60 * 60 * 1000); // Created 2 days ago
+        fakeTrialEnd = new Date(fakeEndTime).toISOString();
+        fakeDaysRemaining = Math.max(0, Math.ceil((fakeEndTime - now) / (1000 * 60 * 60 * 24)));
+    }
+
+    return {
+      plan: fakePlan,
+      isVip,
+      trialEndsOn: fakeTrialEnd,
+      daysRemaining: fakeDaysRemaining,
+      status: "ACTIVE"
+    };
+  }
+
+  const response = await admin.graphql(
+    `#graphql
+    query {
+      appInstallation {
+        activeSubscriptions {
+          name
+          status
+          test
+          trialDays
+          currentPeriodEnd
+          createdAt
+        }
+      }
+    }`
+  );
+
+  const data = await response.json();
+  const activeSubscriptions = data.data.appInstallation.activeSubscriptions;
+
+  let currentPlan = "FREE";
+  let trialEndsOn = null;
+  let daysRemaining = 0;
+
+  if (activeSubscriptions.length > 0) {
+    const sub = activeSubscriptions[0];
+    if (sub.name === "Growth Plan") currentPlan = "GROWTH";
+    if (sub.name === "Pro Plan") currentPlan = "PRO";
+    
+    // Calculate Trial Status
+    // If 'trialDays' > 0, we can check if we are still within that window
+    if (sub.trialDays > 0 && sub.createdAt) {
+      const createdTime = new Date(sub.createdAt).getTime();
+      const trialDurationMs = sub.trialDays * 24 * 60 * 60 * 1000;
+      const endTime = createdTime + trialDurationMs;
+      const now = Date.now();
+      
+      if (endTime > now) {
+        trialEndsOn = new Date(endTime).toISOString();
+        daysRemaining = Math.ceil((endTime - now) / (1000 * 60 * 60 * 24));
+      }
+    }
+  }
+
+  return {
+    plan: currentPlan,
+    isVip,
+    trialEndsOn,
+    daysRemaining,
+    status: activeSubscriptions[0]?.status || "ACTIVE"
+  };
 }
 
 export async function requirePlan(shopDomain, requiredPlan) {

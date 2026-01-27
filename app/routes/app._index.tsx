@@ -20,14 +20,16 @@ import {
 import { CreditCardIcon, ReceiptIcon, SettingsIcon, LockIcon } from "@shopify/polaris-icons";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
-import { checkSubscription } from "../billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const { getPlanDetails } = await import("../billing.server");
+
   const { session, admin } = await authenticate.admin(request);
   // (Terms Acceptance is now checked globally in app.jsx layout)
 
   // 2. Sync & Fetch Shop Plan
-  const plan = await checkSubscription(request);
+  const planDetails = await getPlanDetails(request);
+  const plan = planDetails.plan;
 
   // 3. Fetch Quick Stats
   const pendingInvoices = await db.invoice.count({
@@ -85,15 +87,45 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // Pass this flag to the UI to optionally hide the banner if they are already set up
   const isSetupComplete = !!existingCustomization?.enabled;
 
-  return json({ plan, pendingInvoices, overdueInvoices, isSetupComplete });
+  return json({ 
+    plan: planDetails.plan, 
+    trialEndsOn: planDetails.trialEndsOn,
+    daysRemaining: planDetails.daysRemaining,
+    isVip: planDetails.isVip,
+    pendingInvoices, 
+    overdueInvoices, 
+    isSetupComplete 
+  });
 };
 
 export default function Index() {
-  const { plan, pendingInvoices, overdueInvoices, isSetupComplete } = useLoaderData<typeof loader>();
+  const { plan, trialEndsOn, daysRemaining, isVip, pendingInvoices, overdueInvoices, isSetupComplete } = useLoaderData<typeof loader>();
   const [modalOpen, setModalOpen] = useState(false);
   
   const isFree = plan === "FREE";
+  const isGrowth = plan === "GROWTH";
   const isPro = plan === "PRO";
+
+  // --- TRIAL BANNER ---
+  const TrialBanner = () => {
+    if (!trialEndsOn || daysRemaining < 0) return null;
+    
+    // Customize text for VIPs vs Standard
+    const title = isVip 
+        ? `VIP Access Active: ${daysRemaining} days remaining in your extended trial.`
+        : `Free Trial Active: ${daysRemaining} days remaining.`;
+
+    return (
+      <Box paddingBlockEnd="400">
+        <Banner tone="info" title={title}>
+          <p>
+             Your trial ends on {new Date(trialEndsOn).toLocaleDateString()}. 
+             Need specific help? <Link url="/app/support">Contact Support</Link>.
+          </p>
+        </Banner>
+      </Box>
+    );
+  };
 
   // --- SETUP GUIDE MODAL COMPONENT ---
   const SetupGuideModal = () => (
@@ -170,6 +202,9 @@ export default function Index() {
       <SetupGuideModal />
 
       <BlockStack gap="600">
+
+        {/* TRIAL WARNING BANNER */}
+        <TrialBanner />
         
         {/* OVERDUE WARNING BANNER */}
         {overdueInvoices > 0 && (
@@ -242,12 +277,24 @@ export default function Index() {
                             <Box paddingBlock="200">
                                 <Text variant="bodyMd" as="p" tone="subdued">
                                     {isFree && "Limited to 5 Net Terms customers. Upgrade to automate approvals and remove limits."}
+                                    {isGrowth && "Unlimited customers enabled. Upgrade to Pro for PDF Invoicing and Priority Support."}
                                     {isPro && "You are running on the highest tier. Unlimited access enabled."}
                                 </Text>
                             </Box>
 
+                            {/* TRIAL DAYS REMAINING - PUSH TO UPGRADE */}
+                            {trialEndsOn && daysRemaining >= 0 && (
+                                <Box paddingBlockEnd="200">
+                                    <Text variant="bodySm" as="p" tone="success" fontWeight="bold" alignment="center">
+                                        ✨ {daysRemaining} Day{daysRemaining !== 1 ? 's' : ''} Remaining in Free Trial
+                                    </Text>
+                                </Box>
+                            )}
+
                             {!isPro ? (
-                                <Button url="/app/pricing" fullWidth tone="critical">Upgrade to Pro</Button>
+                                <Button url="/app/pricing" fullWidth tone="critical">
+                                    {isFree ? "Upgrade to Growth" : "Upgrade to Pro"}
+                                </Button>
                             ) : (
                                 <Button url="/app/pricing" fullWidth variant="plain">Manage Subscription</Button>
                             )}

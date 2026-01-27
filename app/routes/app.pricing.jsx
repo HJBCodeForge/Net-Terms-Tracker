@@ -1,12 +1,13 @@
 import { json } from "@remix-run/node";
 import { useLoaderData, useSubmit, useActionData } from "@remix-run/react";
-import { Page, Layout, Card, Text, Button, BlockStack, Box, InlineGrid, Badge, Divider, List, InlineStack } from "@shopify/polaris";
+import { Page, Layout, Card, Text, Button, BlockStack, Box, InlineGrid, Badge, Divider, List, InlineStack, Banner } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
-import { createSubscription, checkSubscription, cancelSubscription } from "../billing.server";
 import { useEffect } from "react";
 
-// LOADER & ACTION (Preserved)
+// LOADER
 export const loader = async ({ request }) => {
+  const { getPlanDetails } = await import("../billing.server");
+  
   const url = new URL(request.url);
   const shopParam = url.searchParams.get("shop");
   const chargeId = url.searchParams.get("charge_id");
@@ -16,11 +17,14 @@ export const loader = async ({ request }) => {
   }
 
   const { session } = await authenticate.admin(request);
-  const currentPlan = await checkSubscription(request);
-  return json({ currentPlan });
+  const planDetails = await getPlanDetails(request);
+  return json({ currentPlan: planDetails.plan, isVip: planDetails.isVip });
 };
 
+// ACTION
 export const action = async ({ request }) => {
+  const { createSubscription, cancelSubscription } = await import("../billing.server");
+  
   const { session } = await authenticate.admin(request);
   const formData = await request.formData();
   const desiredPlan = formData.get("plan");
@@ -65,8 +69,11 @@ export default function PricingPage() {
     );
   }
 
-  const { currentPlan } = loaderData;
+  const { currentPlan, isVip } = loaderData;
   const handlePlanSelect = (plan) => submit({ plan }, { method: "POST" });
+  
+  // Dynamic Trial Text
+  const trialText = isVip ? "365-Day VIP Free Trial" : "7-Day Free Trial";
 
   const PlanCard = ({ tier, title, price, features, recommended = false, basePlan = null }) => {
     const isActive = currentPlan === tier;
@@ -86,6 +93,13 @@ export default function PricingPage() {
                 <Text as="p" variant="heading2xl" fontWeight="bold">
                 ${price}<span style={{fontSize: "0.5em", color: "#6D7175", fontWeight: "normal"}}>/mo</span>
                 </Text>
+
+                {/* VISIBLE TRIAL PERIOD INDICATOR */}
+                {!isFree && !isActive && (
+                   <Text as="p" variant="bodySm" tone="success" fontWeight="bold">
+                     ✨ Includes {trialText}
+                   </Text>
+                )}
             </BlockStack>
             
             <Divider />

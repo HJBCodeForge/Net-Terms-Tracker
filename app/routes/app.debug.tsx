@@ -95,6 +95,45 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     return json({ status: "success", logs, addedCount });
   }
+
+  // C. SETUP DEFINITIONS
+  if (intent === "setup_definitions") {
+      const response = await admin.graphql(
+        `#graphql
+        mutation CreateMetafieldDefinition($definition: MetafieldDefinitionInput!) {
+          metafieldDefinitionCreate(definition: $definition) {
+            createdDefinition { id name }
+            userErrors { field message }
+          }
+        }`,
+        {
+          variables: {
+            definition: {
+              name: "Order Due Date",
+              namespace: "net_terms",
+              key: "due_date",
+              type: "date_time",
+              ownerType: "ORDER",
+              access: {
+                storefront: "PUBLIC_READ"
+              }
+            }
+          }
+        }
+      );
+      
+      const data = await response.json();
+      console.log("Definition Create:", JSON.stringify(data));
+      
+      return json({ 
+          status: "success", 
+          logs: [], 
+          message: data.data.metafieldDefinitionCreate.userErrors.length > 0 
+            ? `Error: ${data.data.metafieldDefinitionCreate.userErrors[0].message}`
+            : "Definition Created - Storefront Read Access Enabled"
+      });
+  }
+
   return json({ status: "success", logs: [] });
 };
 
@@ -110,10 +149,24 @@ export default function DebugPage() {
         <Layout.Section>
           <Card>
             <BlockStack gap="400">
-              <Text variant="headingMd" as="h2">Database Repair</Text>
-              <Text as="p">Current Invoices in DB: <strong>{count}</strong></Text>
+              <Text variant="headingMd" as="h2">Admin Tools</Text>
               
               {message && <Banner tone="success">{message}</Banner>}
+
+              <BlockStack gap="200">
+                 <Text as="h3" variant="headingSm">Setup</Text>
+                 <fetcher.Form method="post">
+                    <input type="hidden" name="intent" value="setup_definitions" />
+                    <Button submit loading={fetcher.state !== "idle"}>
+                    Enable Storefront Access (Metafield)
+                    </Button>
+                </fetcher.Form>
+              </BlockStack>
+
+              <Box paddingBlockStart="400">
+                <Text variant="headingMd" as="h2">Database Repair</Text>
+                <Text as="p">Current Invoices in DB: <strong>{count}</strong></Text>
+              </Box>
 
               <InlineStack gap="300">
                 <fetcher.Form method="post">
