@@ -4,19 +4,20 @@ import db from "../db.server";
 import { renderToStream } from "@react-pdf/renderer";
 import InvoiceDocument from "../components/InvoiceDocument";
 
-// 4. LOADER
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
-  const invoiceId = params.id;
+  // 1. AUTHENTICATE PROXY
+  const { admin, session } = await authenticate.public.appProxy(request);
 
-  // A. FETCH SETTINGS & CHECK PLAN
+  if (!session || !admin) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  const invoiceId = params.id;
+  
+  // A. FETCH SETTINGS (No Plan Check)
   const shopRecord = await db.shop.findUnique({
     where: { shop: session.shop },
   });
-
-  if (shopRecord?.plan !== "PRO") {
-    return new Response("Upgrade to Pro Required", { status: 403 });
-  }
 
   // B. FETCH FALLBACK SHOP DATA (From Shopify API)
   const shopifyResponse = await admin.graphql(
@@ -42,7 +43,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const shopData = shopifyJson.data?.shop || {};
 
   // B2. FETCH ONLINE STORE BRANDING (THEME OR CHECKOUT BRANDING)
-  // If the user hasn't set a custom logo in the app, try to pull it from the Online Store (Checkout Branding or Theme)
   let remoteBrand = { logo: null as string | null, color: null as string | null };
   const currentBrandColor = shopRecord?.brandColor;
   const currentLogo = shopRecord?.logoUrl;
@@ -99,7 +99,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
             }
         }
 
-        // STRATEGY 2: THEME SETTINGS (Fallback if Checkout Branding missed)
+        // STRATEGY 2: THEME SETTINGS (Fallback)
         if (!remoteBrand.logo || !remoteBrand.color) {
             const themeResp = await admin.graphql(
                 `#graphql
@@ -136,14 +136,12 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
                     const data = JSON.parse(content);
                     const current = data.current || {};
                     
-                    // 1. Find Logo in Header Section (if not found in checkout)
                     if (!remoteBrand.logo) {
                         const sections = current.sections || {};
                         const header = Object.values(sections).find((s:any) => s.type === 'header' || s.type?.includes('header')) as any;
                         const logoRef = header?.settings?.logo; 
 
                         if (logoRef && typeof logoRef === 'string') {
-                            // Resolve shopify://shop_images/foo.png
                             const filename = logoRef.split('/').pop();
                             const fileResp = await admin.graphql(
                                 `#graphql
@@ -165,7 +163,6 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
                         }
                     }
 
-                    // 2. Find Brand Color (if not found in checkout)
                     if (!remoteBrand.color) {
                         const colorKeys = [
                             'colors_solid_button_background', 
@@ -184,8 +181,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
             }
         }
         
-        // STRATEGY 3: SHOP METAFIELDS (Brand Namespace fallback)
-        // This is where "Settings -> Brand" settings are often stored if not using Checkout Extensibility
+        // STRATEGY 3: SHOP METAFIELDS
         if (!remoteBrand.logo || !remoteBrand.color) { 
              const metaResp = await admin.graphql(
                 `#graphql
@@ -214,11 +210,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
              if (!remoteBrand.color && brandColorsVal) {
                  try {
                      const parsed = JSON.parse(brandColorsVal);
-                     // Format usually: { primary: [{background: "..."}], ... }
                      const primary = parsed.primary?.[0]?.background;
                      if (primary) remoteBrand.color = primary;
                  } catch (e) {
-                     // ignore parse error
+                     // ignore error
                  }
              }
         }
@@ -234,10 +229,29 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   };
 
   // C. FETCH INVOICE
-  const invoice = await db.invoice.findUnique({ where: { id: invoiceId } });
-  if (!invoice) throw new Response("Not Found", { status: 404 });
+  // Use orderId to look up invoice if invoiceId param is actually orderId (common confusion), 
+  // but let's assume it IS the invoice UUID from our DB.
+  // Wait, the Liquid template has `{{ order.id }}`.
+  // Order ID is `gid://shopify/Order/12345` or just `12345`.
+  // My DB Invoice has `orderId` (string) and `id` (uuid).
+  // The user said: "PDF Invoice button for each specific order."
+  // The link I planned was `/apps/net-terms/invoice/{{ order.id | split: '/' | last }}`.
+  // So the param is the numeric Shopfiy Order ID.
+  // BUT `app.invoice_pdf.$id.tsx` expects `params.id` to be the Invoice **UUID**.
+  
+  // I need to find the invoice by Order ID.
+  const orderIdParam = params.id;
+  let invoice = await db.invoice.findFirst({
+    where: { orderId: { endsWith: orderIdParam } }
+  });
+  
+  // If not found, maybe try to find by orderNumber? No, orderId is better.
+  if (!invoice) {
+       // If usage via Order ID fails (invoice not created yet request?), return 404
+      return new Response("Invoice Not Found", { status: 404 });
+  }
 
-  // D. FETCH LINE ITEMS (Using your existing logic)
+  // D. FETCH LINE ITEMS
   let orderGid = invoice.orderId;
   if (!orderGid.startsWith("gid://")) {
     orderGid = `gid://shopify/Order/${orderGid}`;

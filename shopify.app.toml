@@ -34,3 +34,9 @@ redirect_urls = [
   "https://net-terms-tracker-hjb.fly.dev/auth/shopify/callback",
   "https://net-terms-tracker-hjb.fly.dev/api/auth/callback"
 ]
+
+[app_proxy]
+url = "https://net-terms-tracker-hjb.fly.dev/api/proxy"
+subpath = "net-terms"
+prefix = "apps"
+
