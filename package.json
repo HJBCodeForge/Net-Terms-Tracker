@@ -23,6 +23,7 @@
     "node": "^18.20 || ^20.10 || >=21.0.0"
   },
   "dependencies": {
+    "@flydotio/litestream": "^1.0.1",
     "@prisma/client": "^6.2.1",
     "@react-pdf/renderer": "^4.3.1",
     "@remix-run/dev": "^2.16.1",
@@ -77,5 +78,8 @@
     "minimatch": "9.0.5",
     "vite": "^6.2.2"
   },
-  "author": "owner"
+  "author": "owner",
+  "dockerfile": {
+    "litestream": true
+  }
 }

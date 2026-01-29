@@ -6,9 +6,14 @@ import fs from 'node:fs'
 
 const env = { ...process.env }
 
-// Ensure DATABASE_URL is set to the volume path
-env.DATABASE_URL = "file:/data/dev.sqlite"
-console.log("Setting DATABASE_URL to:", env.DATABASE_URL);
+// Only fallback to sqlite if DATABASE_URL is not provided (e.g. not using Postgres)
+// But for production, we expect DATABASE_URL to be set via secrets
+if (!env.DATABASE_URL) {
+  env.DATABASE_URL = "file:/data/dev.sqlite"
+  console.log("No DATABASE_URL found. Defaulting to SQLite volume.");
+}
+
+console.log(`Database URL set (using secret or default).`);
 
 // prepare database
 console.log("Running migrations...");

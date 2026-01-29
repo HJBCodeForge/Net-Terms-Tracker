@@ -1,4 +1,4 @@
-# fly.toml app configuration file generated for net-terms-tracker-hjb
+# fly.toml app configuration file generated for net-terms-tracker-hjb on 2026-01-29T10:08:24-05:00
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
@@ -8,10 +8,12 @@ primary_region = 'yyz'
 
 [build]
 
+[deploy]
+
 [env]
-  PORT = "3000"
-  HOST = "0.0.0.0" # <--- KEEPS THE APP PUBLICLY ACCESSIBLE
-  SCOPES = 'read_customers,read_orders,read_payment_customizations,write_customers,write_payment_customizations,write_products'
+  HOST = '0.0.0.0'
+  PORT = '3000'
+  SCOPES = 'read_content,read_customers,read_orders,read_payment_customizations,read_themes,read_files,read_checkout_branding_settings,write_content,write_customers,write_orders,write_payment_customizations,write_products'
   SHOPIFY_API_KEY = 'bc017a167faa299a9821d82028e0aa32'
   SHOPIFY_APP_URL = 'https://net-terms-tracker-hjb.fly.dev'
 
@@ -28,16 +30,13 @@ primary_region = 'yyz'
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = false   # <--- CHANGED: PREVENTS SERVER FROM SLEEPING
+  auto_stop_machines = 'off'
   auto_start_machines = true
-  min_machines_running = 1     # <--- CHANGED: KEEPS 1 SERVER ALWAYS ON
+  min_machines_running = 1
   processes = ['app']
 
 [[vm]]
   memory = '1gb'
   cpu_kind = 'shared'
   cpus = 1
-
-[deploy]
-  # PREVENTS ACCIDENTAL DATABASE WIPES
-  # release_command = "npx prisma migrate reset --force"
+  memory_mb = 1024
