@@ -39,7 +39,8 @@ export const loader = async ({ request }) => {
       }
   }
 
-  const showDiagnostics = process.env.NODE_ENV === "development" || VIP_SHOPS.includes(session.shop);
+  // Diagnostics visible ONLY to specific dev shops in the approved list
+  const showDiagnostics = VIP_SHOPS.includes(session.shop); 
 
   return json({ apiKey: process.env.SHOPIFY_API_KEY || "", showDiagnostics });
 };

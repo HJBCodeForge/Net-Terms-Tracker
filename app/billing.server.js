@@ -24,7 +24,8 @@ export const PLANS = {
 
 const VIP_SHOPS = [
   "netterms-demo-v1.myshopify.com",
-  "hjb-test-store.myshopify.com"
+  "hjb-codeforge-test-01.myshopify.com",
+  "hjb-billing-test.myshopify.com"
 ];
 
 export { VIP_SHOPS }; // Export for use in pricing page
