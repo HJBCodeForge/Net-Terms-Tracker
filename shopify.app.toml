@@ -11,6 +11,11 @@ automatically_update_urls_on_dev = true
 [webhooks]
 api_version = "2025-04"
 
+[webhooks.privacy_compliance]
+customer_data_request_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
+customer_redaction_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
+shop_redaction_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
+
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
@@ -39,8 +44,5 @@ url = "https://net-terms-tracker-hjb.fly.dev/api/proxy"
 subpath = "net-terms"
 prefix = "apps"
 
-[webhooks.privacy_compliance]
-customer_data_request_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
-customer_redaction_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
-shop_redaction_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
+
 
