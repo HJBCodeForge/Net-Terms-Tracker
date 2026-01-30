@@ -11,22 +11,28 @@ automatically_update_urls_on_dev = true
 [webhooks]
 api_version = "2025-04"
 
-[webhooks.privacy_compliance]
-customer_data_request_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
-customer_redaction_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
-shop_redaction_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
+# 1. Compliance Subscriptions (Explicitly grouped)
+# These topics are MANDATORY and use the new compliance_topics list format 
+[[webhooks.subscriptions]]
+uri = "/webhooks"
+compliance_topics = [ 
+  "customers/redact",
+  "customers/data_request",
+  "shop/redact"
+]
 
-  [[webhooks.subscriptions]]
-  topics = [ "app/scopes_update" ]
-  uri = "/webhooks/app/scopes_update"
+# 2. Standard Business Logic Subscriptions
+[[webhooks.subscriptions]]
+topics = [ "app/scopes_update" ]
+uri = "/webhooks/app/scopes_update"
 
-  [[webhooks.subscriptions]]
-  topics = [ "orders/create" ]
-  uri = "/webhooks"
+[[webhooks.subscriptions]]
+topics = [ "orders/create" ]
+uri = "/webhooks"
 
-  [[webhooks.subscriptions]]
-  topics = [ "app/uninstalled" ]
-  uri = "/webhooks/app/uninstalled"
+[[webhooks.subscriptions]]
+topics = [ "app/uninstalled" ]
+uri = "/webhooks/app/uninstalled"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
