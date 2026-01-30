@@ -9,7 +9,7 @@ embedded = true
 automatically_update_urls_on_dev = true
 
 [webhooks]
-api_version = "2025-01"
+api_version = "2025-04"
 
   [[webhooks.subscriptions]]
   topics = [ "app/scopes_update" ]
@@ -18,7 +18,6 @@ api_version = "2025-01"
   [[webhooks.subscriptions]]
   topics = [ "orders/create" ]
   uri = "/webhooks"
-  compliance_topics = [ "customers/data_request" ]
 
   [[webhooks.subscriptions]]
   topics = [ "app/uninstalled" ]
@@ -39,4 +38,9 @@ redirect_urls = [
 url = "https://net-terms-tracker-hjb.fly.dev/api/proxy"
 subpath = "net-terms"
 prefix = "apps"
+
+[webhooks.privacy_compliance]
+customer_data_request_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
+customer_redaction_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
+shop_redaction_url = "https://net-terms-tracker-hjb.fly.dev/webhooks"
 
