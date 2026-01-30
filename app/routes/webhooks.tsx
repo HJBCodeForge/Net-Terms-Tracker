@@ -1,11 +1,17 @@
-import { type ActionFunctionArgs } from "@remix-run/node";
+import { type ActionFunctionArgs, type LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+
+// DEBUG: ADD LOADER TO VERIFY ROUTING
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  console.log(`[Webhook Test] GET request received on /webhooks`);
+  return new Response("Webhook Endpoint is Reachable. (Method: GET)", { status: 200 });
+};
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   // DEBUGGING: Log incoming request details BEFORE authentication
   const url = new URL(request.url);
-  console.log(`[Webhook Entry] POST ${url.pathname}`);
+  console.log(`[Webhook Entry] POSŤ ${url.pathname}`);
   console.log(`[Webhook Entry] Headers:`, JSON.stringify(Object.fromEntries(request.headers.entries())));
   
   // Verify secret is providing a value (do not log the actual secret)
