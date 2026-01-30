@@ -3,9 +3,34 @@ import { authenticate } from "../shopify.server";
 import db from "../db.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { topic, shop, session, admin, payload } = await authenticate.webhook(request);
+  // DEBUGGING: Log incoming request details BEFORE authentication
+  const url = new URL(request.url);
+  console.log(`[Webhook Entry] POST ${url.pathname}`);
+  console.log(`[Webhook Entry] Headers:`, JSON.stringify(Object.fromEntries(request.headers.entries())));
+  
+  // Verify secret is providing a value (do not log the actual secret)
+  if (!process.env.SHOPIFY_API_SECRET) {
+    console.error(`[Webhook Entry] ❌ CRITICAL: SHOPIFY_API_SECRET is missing in process.env`);
+  }
 
-  console.log(`[Webhook] Received ${topic} for ${shop}`);
+  let hookData;
+  try {
+    hookData = await authenticate.webhook(request);
+  } catch (error) {
+    // If authenticate.webhook fails, it often throws a Response (e.g., 401 Unauthorized)
+    if (error instanceof Response) {
+      console.error(`[Webhook Entry] ❌ Authentication failed. Status: ${error.status}`);
+      // Clone response to read body if needed, but status is usually enough
+    } else {
+      console.error(`[Webhook Entry] ❌ Unexpected validation error:`, error);
+    }
+    // Re-throw so Remix handles the 401/400 correctly
+    throw error;
+  }
+
+  const { topic, shop, session, admin, payload } = hookData;
+
+  console.log(`[Webhook] ✅ Verified ${topic} for ${shop}`);
 
   // =================================================================
   // 1. GDPR & REDACTION LOGIC (KEEPING THIS INTACT)

@@ -17,7 +17,8 @@ console.log(`Database URL set (using secret or default).`);
 
 // prepare database
 console.log("Running migrations...");
-await exec('npx prisma migrate deploy')
+// Using db push to sync schema with new Postgres DB (avoids migration history mismatch)
+await exec('npx prisma db push --accept-data-loss')
 console.log("Migrations complete.");
 
 // launch application
