@@ -16,8 +16,10 @@ const shopify = shopifyApp({
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
+  isEmbeddedApp: true, // Explicitly declare this for the new auth strategy
   future: {
     removeRest: true,
+    unstable_newEmbeddedAuthStrategy: true, // <--- THIS FIXES THE LOGIN LOOP
   },
   ...(process.env.SHOP_CUSTOM_DOMAIN
     ? { customShopDomains: [process.env.SHOP_CUSTOM_DOMAIN] }
